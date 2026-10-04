@@ -3,17 +3,25 @@ import { useState, useCallback, useEffect } from "react";
 /**
  * Keyboard navigation hook for the results list.
  * Handles ↑/↓ arrows, Enter, Esc, Tab, Ctrl+1-9 quick-launch.
+ *
+ * The selection returns to the top whenever `resetKey` (the query) changes,
+ * but stays put when more results merely arrive for the same query.
  */
 export function useKeyboardNav(
   resultCount: number,
   onSelect: (index: number) => void,
   onEscape: () => void,
+  resetKey: string,
 ) {
   const [selectedIndex, setSelectedIndex] = useState(0);
 
-  // Reset selection when result count changes
   useEffect(() => {
     setSelectedIndex(0);
+  }, [resetKey]);
+
+  // Never point past the end of a list that got shorter
+  useEffect(() => {
+    setSelectedIndex((current) => Math.min(current, Math.max(resultCount - 1, 0)));
   }, [resultCount]);
 
   const handleKeyDown = useCallback(

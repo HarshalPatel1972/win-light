@@ -1,4 +1,5 @@
 import React, { useRef, useEffect } from "react";
+import { useT } from "../i18n";
 
 interface SearchInputProps {
   query: string;
@@ -16,6 +17,7 @@ const SearchInput: React.FC<SearchInputProps> = ({
   onKeyDown,
   isLoading,
 }) => {
+  const t = useT();
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Auto-focus on mount and when the window is shown
@@ -45,19 +47,8 @@ const SearchInput: React.FC<SearchInputProps> = ({
   return (
     <div className="search-container" data-tauri-drag-region>
       <div className="search-wrapper">
-        {/* Search icon */}
-        <svg
-          className="search-icon"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <circle cx="11" cy="11" r="8" />
-          <line x1="21" y1="21" x2="16.65" y2="16.65" />
-        </svg>
+        {/* The spark: the app's light. It pulses while a search is running. */}
+        <div className={`spark ${isLoading ? "thinking" : ""}`} />
 
         <input
           ref={inputRef}
@@ -66,21 +57,19 @@ const SearchInput: React.FC<SearchInputProps> = ({
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Search apps and files..."
+          placeholder={t("searchPlaceholder")}
           autoFocus
           spellCheck={false}
           autoComplete="off"
         />
 
-        {/* Loading spinner or clear button */}
-        {isLoading ? (
-          <div className="spinner" />
-        ) : query.length > 0 ? (
+        {/* Clear button */}
+        {query.length > 0 ? (
           <button
             className="clear-button"
             onClick={onClear}
             tabIndex={-1}
-            aria-label="Clear search"
+            aria-label={t("clearSearch")}
           >
             ✕
           </button>

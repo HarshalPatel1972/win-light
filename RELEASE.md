@@ -1,6 +1,6 @@
 # Release Process
 
-This document describes how to create a new release for AnCheck.
+This document describes how to create a new release for Matchstick.
 
 ---
 
@@ -92,14 +92,14 @@ Before creating a release tag, test the production build locally:
 npm run tauri build
 
 # Output locations:
-#   NSIS installer: src-tauri/target/release/bundle/nsis/AnCheck_0.2.0_x64-setup.exe
-#   MSI installer:  src-tauri/target/release/bundle/msi/AnCheck_0.2.0_x64_en-US.msi
-#   Portable exe:   src-tauri/target/release/ancheck.exe
+#   NSIS installer: src-tauri/target/release/bundle/nsis/Matchstick_0.2.0_x64-setup.exe
+#   MSI installer:  src-tauri/target/release/bundle/msi/Matchstick_0.2.0_x64_en-US.msi
+#   Portable exe:   src-tauri/target/release/matchstick.exe
 ```
 
 Test the installer:
 1. Run the NSIS `.exe` installer
-2. Verify it installs to `C:\Program Files\AnCheck\` (or user-selected directory)
+2. Verify it installs to `C:\Program Files\Matchstick\` (or user-selected directory)
 3. Verify Start Menu shortcut is created
 4. Launch from Start Menu
 5. Press `Ctrl+Space` — launcher should appear
@@ -146,6 +146,6 @@ Navigate to **Settings → Secrets and variables → Actions** in the GitHub rep
 
 When a new release is published:
 1. GitHub Actions uploads `latest.json` as a release asset
-2. The running AnCheck app periodically checks the `latest.json` endpoint
+2. The running Matchstick app periodically checks the `latest.json` endpoint
 3. If a newer version is found, a dialog prompts the user to update
 4. The update is downloaded, signature-verified, and installed automatically

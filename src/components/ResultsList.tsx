@@ -1,28 +1,43 @@
 import React, { useRef, useEffect } from "react";
-import type { SearchResult } from "../hooks/useSearch";
+import type { Answer, SearchResult } from "../hooks/useSearch";
 import ResultItem from "./ResultItem";
+import { greetingKey, useT, type MessageKey } from "../i18n";
 
 interface ResultsListProps {
+  /** Search results, or the user's most-used items when nothing is typed. */
   results: SearchResult[];
-  mathResult: string | null;
+  /** A calculation or conversion answered directly, if the query is one. */
+  answer: Answer | null;
+  onCopyAnswer: () => void;
   query: string;
+  /** The launcher shortcut, formatted for display. */
+  hotkey: string;
   selectedIndex: number;
   onSelect: (index: number) => void;
   onHover: (index: number) => void;
   isLoading: boolean;
 }
 
+/** Results come in groups; the ones beyond plain name matches get a heading. */
+const GROUP_TITLE: Record<string, MessageKey> = {
+  content: "insideFiles",
+  web: "web",
+};
+
 const ResultsList: React.FC<ResultsListProps> = ({
   results,
-  mathResult,
+  answer,
+  onCopyAnswer,
   query,
+  hotkey,
   selectedIndex,
   onSelect,
   onHover,
-  isLoading,
 }) => {
+  const t = useT();
   const containerRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
+  const isHome = !query.trim();
 
   // Auto-scroll to keep selected item visible
   useEffect(() => {
@@ -40,79 +55,56 @@ const ResultsList: React.FC<ResultsListProps> = ({
     }
   }, [selectedIndex]);
 
-  // Show nothing if no query
-  if (!query.trim()) {
-    return (
-      <div className="results-container">
-        <div className="no-results">
-          <div className="icon">🔍</div>
-          <div className="text">Type to search apps and files</div>
-          <div className="text" style={{ fontSize: "12px", opacity: 0.6 }}>
-            Press <kbd style={{
-              display: "inline-flex",
-              padding: "1px 5px",
-              background: "var(--bg-secondary)",
-              border: "1px solid var(--border-color)",
-              borderRadius: "4px",
-              fontSize: "10px",
-              margin: "0 2px",
-            }}>Ctrl+Space</kbd> to toggle this window
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Loading state
-  if (isLoading && results.length === 0) {
-    return (
-      <div className="results-container">
-        <div className="no-results">
-          <div className="spinner" style={{ width: 24, height: 24 }} />
-          <div className="text">Searching...</div>
-        </div>
-      </div>
-    );
-  }
-
-  // No results
-  if (!isLoading && results.length === 0 && !mathResult) {
-    return (
-      <div className="results-container">
-        <div className="no-results">
-          <div className="icon">🤷</div>
-          <div className="text">No results found for "{query}"</div>
-        </div>
-      </div>
-    );
-  }
+  // The hint text is translated as a whole; the shortcut is rendered as a key cap.
+  const [beforeHotkey, afterHotkey] = t("toggleHint").split("{hotkey}");
 
   return (
     <div className="results-container" ref={containerRef} role="listbox">
-      {/* Math result */}
-      {mathResult && (
-        <div className="math-result">
-          <span className="equals">=</span>
-          <span className="value">{mathResult}</span>
-          <span className="label">Calculator</span>
+      {/* Home: a greeting and the things the user comes back to */}
+      {isHome && (
+        <div className="home">
+          <div className="home-greeting">{t(greetingKey(new Date().getHours()))}</div>
+          <div className="home-sub">
+            {results.length > 0 ? t("pickUp") : t("freshStart")}
+          </div>
+          {results.length === 0 && (
+            <div className="home-hint">
+              {beforeHotkey}
+              <kbd>{hotkey}</kbd>
+              {afterHotkey}
+            </div>
+          )}
         </div>
       )}
 
-      {/* File results */}
-      {results.map((result, idx) => (
-        <div
-          key={result.id}
-          ref={idx === selectedIndex ? selectedRef : undefined}
-        >
-          <ResultItem
-            result={result}
-            index={idx}
-            isSelected={idx === selectedIndex}
-            onSelect={onSelect}
-            onHover={onHover}
-          />
-        </div>
-      ))}
+      {/* The answer, when the query is a sum or a conversion. Click to copy. */}
+      {!isHome && answer && (
+        <button className="math-result" onClick={onCopyAnswer} tabIndex={-1} title={t("actCopy")}>
+          <span className="equals">=</span>
+          <span className="value">{answer.value}</span>
+          <span className="label">{answer.detail || t("calculator")}</span>
+        </button>
+      )}
+
+      {results.map((result, idx) => {
+        const group = GROUP_TITLE[result.match_type];
+        const startsGroup = group && results[idx - 1]?.match_type !== result.match_type;
+        return (
+          <div
+            key={`${result.match_type}:${result.id}`}
+            ref={idx === selectedIndex ? selectedRef : undefined}
+          >
+            {startsGroup && <div className="group-title">{t(group)}</div>}
+            <ResultItem
+              result={result}
+              index={idx}
+              isSelected={idx === selectedIndex}
+              onSelect={onSelect}
+              onHover={onHover}
+            />
+          </div>
+        );
+      })}
     </div>
   );
 };

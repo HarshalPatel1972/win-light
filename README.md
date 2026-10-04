@@ -1,4 +1,4 @@
-# AnCheck — Spotlight-like Search Launcher for Windows
+# Matchstick — Spotlight-like Search Launcher for Windows
 
 [![Build](https://github.com/HarshalPatel1972/win-light/actions/workflows/build.yml/badge.svg)](https://github.com/HarshalPatel1972/win-light/actions/workflows/build.yml)
 [![Release](https://github.com/HarshalPatel1972/win-light/releases/latest)](https://github.com/HarshalPatel1972/win-light/releases/latest)
@@ -16,8 +16,8 @@ Go to the [**Releases**](https://github.com/HarshalPatel1972/win-light/releases/
 
 | File | Description |
 |------|-------------|
-| `AnCheck_x.x.x_x64-setup.exe` | **NSIS Installer** (recommended) — installs to Program Files, creates Start Menu shortcut |
-| `AnCheck_x.x.x_x64_en-US.msi` | **MSI Installer** — standard Windows installer |
+| `Matchstick_x.x.x_x64-setup.exe` | **NSIS Installer** (recommended) — installs to Program Files, creates Start Menu shortcut |
+| `Matchstick_x.x.x_x64_en-US.msi` | **MSI Installer** — standard Windows installer |
 
 ### System Requirements
 
@@ -28,15 +28,17 @@ Go to the [**Releases**](https://github.com/HarshalPatel1972/win-light/releases/
 
 ## Features
 
-- **Global Hotkey** — `Ctrl+Space` toggles the launcher from any application
-- **Fast File Indexing** — Indexes Start Menu, Program Files, Desktop, Documents, Downloads
-- **Fuzzy Search** — Multi-strategy matching: exact → prefix → substring → fuzzy
+- **Global Hotkey** — `Ctrl+Space` toggles the launcher from any application (changeable in Settings)
+- **Fast File Indexing** — Indexes Start Menu, Store apps, Program Files, Desktop, Documents, Downloads
+- **Live Index** — A file-system watcher picks up new, renamed and deleted files within a second
+- **Fuzzy Search** — Multi-strategy matching: exact → prefix → substring → fuzzy, in memory
 - **Smart Ranking** — Boosts apps, frequently-used items, and recently-opened files
 - **Calculator** — Type math expressions like `2+2` or `(100/5)*3` for instant results
-- **System Tray** — Runs quietly in the tray with right-click menu
+- **System Tray** — Runs quietly in the tray with right-click menu; starts with Windows
 - **Keyboard-First** — Full navigation with ↑↓, Enter, Esc, Ctrl+1-9 quick-launch
-- **Auto-Updates** — Automatically checks for new versions from GitHub Releases
-- **Polished UI** — Frameless overlay with blur effect, dark theme, smooth animations
+- **Auto-Updates** — Checks GitHub Releases at startup and every 6 hours; one-click install
+- **Polished UI** — Frameless overlay with blur effect, real app icons, dark and light themes
+- **Localized** — English, Spanish, French, German, Portuguese, Hindi, Chinese, Japanese
 
 ---
 
@@ -50,16 +52,33 @@ Go to the [**Releases**](https://github.com/HarshalPatel1972/win-light/releases/
 | `Esc` | Close launcher |
 | `Tab` / `Shift+Tab` | Cycle through results |
 | `Ctrl+1` – `Ctrl+9` | Quick-launch first 9 results |
+| `Ctrl+,` | Open Settings |
 | Right-click result | Open containing folder |
+
+---
+
+## Settings
+
+Open with `Ctrl+,`, the ⚙ button in the footer, or the tray menu.
+
+- **Launcher shortcut** — click the button and press a new combination. If another app already owns it, the previous shortcut stays active.
+- **Start with Windows** — on by default for installed builds; the app starts hidden in the tray.
+- **Theme** — System, Dark or Light.
+- **Language** — Automatic (follows Windows) or a fixed language.
+- **Index** — rebuild on demand.
+- **Updates** — check and install.
+
+Settings are stored in `%LOCALAPPDATA%\Matchstick\settings.json`.
 
 ---
 
 ## System Tray
 
-When the launcher window is hidden, AnCheck stays in the system tray:
+When the launcher window is hidden, Matchstick stays in the system tray:
 
 - **Left click** — Show launcher
 - **Right click → Show Launcher** — Show launcher
+- **Right click → Settings…** — Open the settings screen
 - **Right click → Rebuild Index** — Force full re-index
 - **Right click → Exit** — Quit the application
 
@@ -98,7 +117,7 @@ npm run tauri build
 # Output:
 #   NSIS installer → src-tauri/target/release/bundle/nsis/
 #   MSI installer  → src-tauri/target/release/bundle/msi/
-#   Executable     → src-tauri/target/release/ancheck.exe
+#   Executable     → src-tauri/target/release/matchstick.exe
 ```
 
 ---
@@ -106,27 +125,35 @@ npm run tauri build
 ## Architecture
 
 ```
-ancheck/
+matchstick/
 ├── src/                          # React frontend
 │   ├── App.tsx                   # Main app — wires search, navigation, events
 │   ├── main.tsx                  # Entry point
+│   ├── i18n.ts                   # Translations and the useT() hook
 │   ├── components/
 │   │   ├── SearchInput.tsx       # Search bar with auto-focus and clear button
 │   │   ├── ResultsList.tsx       # Scrollable results with math display
-│   │   └── ResultItem.tsx        # Single result row with icon, highlight, badge
+│   │   ├── ResultItem.tsx        # Single result row with icon, highlight, badge
+│   │   └── Settings.tsx          # Settings screen
 │   ├── hooks/
 │   │   ├── useSearch.ts          # Debounced search + math eval via Tauri invoke
-│   │   └── useKeyboardNav.ts     # Arrow, Enter, Esc, Tab, Ctrl+N navigation
+│   │   ├── useKeyboardNav.ts     # Arrow, Enter, Esc, Tab, Ctrl+N navigation
+│   │   ├── useSettings.ts        # Settings state, theme application
+│   │   └── useIcon.ts            # Cached shell icons for results
 │   └── styles/
 │       └── main.css              # Complete styling with Tailwind + custom CSS
 │
 ├── src-tauri/                    # Rust backend
 │   ├── src/
-│   │   ├── lib.rs                # Tauri setup, commands, tray, hotkey, background tasks
-│   │   ├── db.rs                 # SQLite database: schema, upsert, search, metadata
-│   │   ├── indexer.rs            # File system walker: scans directories, classifies files
-│   │   ├── searcher.rs           # Multi-strategy search: SQL + fuzzy + scoring + math eval
-│   │   └── launcher.rs           # File/app launching: exe, lnk, shell open, explorer
+│   │   ├── lib.rs                # Tauri setup, commands, tray, hotkey, updater, background tasks
+│   │   ├── db.rs                 # SQLite persistence: schema, upsert, reconcile, usage data
+│   │   ├── indexer.rs            # Indexing rules, full scan, file-system watcher
+│   │   ├── apps.rs               # Microsoft Store / packaged app enumeration
+│   │   ├── searcher.rs           # In-memory index, ranking, fuzzy matching, math eval
+│   │   ├── launcher.rs           # Launching through ShellExecuteW, reveal in Explorer
+│   │   ├── icons.rs              # Shell icon extraction to PNG
+│   │   ├── settings.rs           # User settings (JSON)
+│   │   └── win.rs                # Shared Win32 helpers
 │   ├── Cargo.toml                # Rust dependencies + release optimizations
 │   └── tauri.conf.json           # Window config, bundle settings, NSIS config, updater
 │
@@ -162,7 +189,7 @@ Results are ranked by a composite score:
 | Initial index (50K files) | <30 seconds |
 | Window show/hide | <50ms |
 | Memory (idle) | <80MB |
-| Background re-index | Every 5 minutes |
+| Index updates | Live (file watcher); full rescan every 6 hours |
 
 ---
 
@@ -192,7 +219,7 @@ See [RELEASE.md](RELEASE.md) for full details.
 The NSIS installer downloads WebView2 automatically. If installing manually, get it from [Microsoft](https://developer.microsoft.com/en-us/microsoft-edge/webview2/).
 
 ### Global hotkey doesn't work
-Another application may have registered `Ctrl+Space`. Close conflicting apps and restart AnCheck.
+Another application may have registered `Ctrl+Space` (it is also the input-method toggle for Chinese keyboards). Open the launcher from the tray icon and pick a different shortcut in Settings.
 
 ### No search results
 Wait for initial indexing to complete (watch the status bar). Force re-index from the tray menu.
