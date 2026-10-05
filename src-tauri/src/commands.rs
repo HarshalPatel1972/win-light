@@ -69,8 +69,34 @@ fn shutdown_tool(flag: &str) -> Result<(), String> {
         .map_err(|e| format!("Could not run shutdown: {}", e))
 }
 
+/// Environment variable that turns system commands into log entries.
+pub const DRY_RUN_VARIABLE: &str = "MATCHSTICK_DRY_RUN";
+
 /// Run the system command with this id (the part after `command:`).
 pub fn run(id: &str) -> Result<(), String> {
+    // Testing the launcher must never restart the machine it is tested on.
+    if is_dry_run() {
+        return log_instead(id);
+    }
+    execute(id)
+}
+
+/// Whether commands are to be logged instead of carried out.
+fn is_dry_run() -> bool {
+    std::env::var_os(DRY_RUN_VARIABLE).is_some()
+}
+
+/// The dry-run stand-in for `execute`: says what would have happened.
+fn log_instead(id: &str) -> Result<(), String> {
+    if !SYSTEM_COMMANDS.contains(&id) {
+        return Err(format!("Unknown command: {}", id));
+    }
+    log::info!("dry run: would run system command '{}'", id);
+    Ok(())
+}
+
+/// Actually carry out a system command.
+fn execute(id: &str) -> Result<(), String> {
     match id {
         "lock" => unsafe { LockWorkStation() }.map_err(|e| format!("Could not lock: {}", e)),
         "sleep" => {
@@ -110,9 +136,24 @@ mod tests {
     }
 
     #[test]
+    fn dry_run_logs_instead_of_executing() {
+        // Deliberately never calls `run` or `execute` with a real id: a
+        // mistake here must not be able to restart the machine running the tests.
+        for id in SYSTEM_COMMANDS {
+            assert_eq!(log_instead(id), Ok(()));
+        }
+        assert!(log_instead("nonsense").is_err());
+
+        std::env::set_var(DRY_RUN_VARIABLE, "1");
+        assert!(is_dry_run());
+        std::env::remove_var(DRY_RUN_VARIABLE);
+        assert!(!is_dry_run());
+    }
+
+    #[test]
     fn every_listed_system_command_is_implemented() {
         // Checked without running them: an unknown id is the only "not implemented" path.
-        assert!(run("definitely-not-a-command").unwrap_err().contains("Unknown command"));
+        assert!(execute("definitely-not-a-command").unwrap_err().contains("Unknown command"));
         let implemented = ["lock", "sleep", "signout", "restart", "shutdown", "emptybin"];
         for id in SYSTEM_COMMANDS {
             assert!(implemented.contains(id), "{} has no implementation", id);
