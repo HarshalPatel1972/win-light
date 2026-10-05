@@ -1,7 +1,9 @@
 # Publishing to the Microsoft Store
 
 Matchstick is in the Store as **Matchstick Launcher**
-(`HarshalPatel.MatchstickLauncher`, Store ID `9PJ64FKJ8C40`). The Store signs
+(`HarshalPatel.MatchstickLauncher`, Store ID `9PJ64FKJ8C40`):
+<https://apps.microsoft.com/detail/9PJ64FKJ8C40>. The first submission
+(package 1.2.2.0) passed certification on 2026-10-06. The Store signs
 the package, so people who install from there never see a SmartScreen warning.
 
 ## How the Store edition differs

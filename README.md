@@ -6,13 +6,21 @@
 
 A fast, native search launcher for Windows, built with **Rust + Tauri v2** and **React + TypeScript**. Press `Ctrl+Space` from anywhere to find and open apps, files, documents by their contents, open windows, system commands and quick answers.
 
-> **Beta.** The installers are not code-signed yet, so Windows shows a "Windows protected your PC" prompt on first run: choose **More info → Run anyway**.
+> **Beta.** Available in the [Microsoft Store](https://apps.microsoft.com/detail/9PJ64FKJ8C40) as *Matchstick Launcher*.
 
 ---
 
 ## Installation
 
+### Microsoft Store (recommended)
+
+**[Get Matchstick Launcher from the Microsoft Store](https://apps.microsoft.com/detail/9PJ64FKJ8C40)**
+
+The Store version is signed by Microsoft, installs without any security warning, and updates itself through the Store.
+
 ### Download Installer
+
+Prefer a classic installer? It is the same app. Because it is not code-signed, Windows shows a "Windows protected your PC" prompt on first run: choose **More info → Run anyway**.
 
 Go to the [**Releases**](https://github.com/HarshalPatel1972/win-light/releases/latest) page and download:
 
