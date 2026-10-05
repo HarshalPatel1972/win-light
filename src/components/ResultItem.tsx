@@ -154,8 +154,11 @@ const ResultItem: React.FC<ResultItemProps> = ({
   const displayName = result.filename.replace(/\.(lnk|url)$/i, "");
 
   // The item's history with the user: "Opened 14× · 2 hours ago"
+  // (for a file recently opened elsewhere on the PC: just when)
   const usage =
-    result.click_count > 0
+    result.match_type === "recent" && result.last_accessed > 0
+      ? formatRelativeTime(result.last_accessed, language)
+      : result.click_count > 0
       ? [
           t("openedTimes", { count: result.click_count }),
           result.last_accessed > 0 && formatRelativeTime(result.last_accessed, language),

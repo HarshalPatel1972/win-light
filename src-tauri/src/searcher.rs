@@ -2,7 +2,7 @@ use crate::db::{Database, FileEntry};
 use nucleo_matcher::pattern::{AtomKind, CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -57,9 +57,11 @@ impl Item {
 
     /// Everything about the item itself (not the query) that makes it a more
     /// or less likely thing to be looking for.
-    fn standing(&self, name_matched: bool, now: i64) -> f64 {
+    ///
+    /// `app_boost` is what being an app is worth for this kind of match.
+    fn standing(&self, app_boost: f64, now: i64) -> f64 {
         // A launcher's first job is launching: an app whose name matches beats files
-        let kind = if self.is_app && name_matched { APP_BOOST } else { file_type_boost(&self.entry.file_type) };
+        let kind = if self.is_app && app_boost > 0.0 { app_boost } else { file_type_boost(&self.entry.file_type) };
 
         // People's own files sit near the top of their folders; the depths
         // belong to projects and tools
@@ -82,11 +84,30 @@ impl Item {
     }
 }
 
+/// One remembered choice.
+struct Pick {
+    filepath: String,
+    count: i64,
+    last_used: i64,
+}
+
+/// Choosing something for a query puts it first for that query from then on...
+const EXACT_PICK_BOOST: f64 = 1000.0;
+const PICK_REPEAT_BOOST: f64 = 20.0;
+/// ...and nudges it up for shorter or longer versions of the same letters.
+const RELATED_PICK_BOOST: f64 = 250.0;
+/// Choices older than this count half; older than the memory span they are forgotten.
+const PICK_FADE_SECS: i64 = 60 * 86_400;
+const PICK_MEMORY_SECS: i64 = 180 * 86_400;
+
 /// How many fuzzy (guessed) matches a search may show.
 const MAX_FUZZY_RESULTS: usize = 3;
 
 /// Added to an app whose name matches the query.
 const APP_BOOST: f64 = 300.0;
+/// Added to an app that is only a fuzzy guess: enough to put "chrme" -> Chrome
+/// ahead of look-alike program files, not enough to pass a real name match.
+const APP_GUESS_BOOST: f64 = 120.0;
 /// Folder levels (drive included) that cost nothing, and the cost of each one beyond.
 const FREE_DEPTH: u8 = 4;
 const DEPTH_PENALTY: f64 = 6.0;
@@ -106,6 +127,8 @@ fn fold(s: &str) -> String {
 #[derive(Default)]
 pub struct SearchIndex {
     items: RwLock<Vec<Item>>,
+    /// What the user chose for what they typed: folded query -> choices.
+    picks: RwLock<HashMap<String, Vec<Pick>>>,
 }
 
 impl SearchIndex {
@@ -149,6 +172,61 @@ impl SearchIndex {
     }
 
     /// Mirror a click into memory so ranking reflects it immediately.
+    /// Load the remembered choices, forgetting ones not repeated in a long while.
+    pub fn load_picks(&self, db: &Database, now: i64) {
+        let _ = db.prune_picks(now - PICK_MEMORY_SECS);
+        let mut picks: HashMap<String, Vec<Pick>> = HashMap::new();
+        for (query, filepath, count, last_used) in db.load_picks().unwrap_or_default() {
+            picks.entry(query).or_default().push(Pick { filepath, count, last_used });
+        }
+        *self.picks.write().unwrap() = picks;
+    }
+
+    /// Remember that `filepath` was chosen after typing `query`. Returns the
+    /// query in the form it is stored under, or None if there is nothing to learn.
+    pub fn record_pick(&self, query: &str, filepath: &str, now: i64) -> Option<String> {
+        let query = fold(query.trim());
+        if query.is_empty() {
+            return None;
+        }
+        let mut picks = self.picks.write().unwrap();
+        let choices = picks.entry(query.clone()).or_default();
+        match choices.iter_mut().find(|pick| pick.filepath == filepath) {
+            Some(pick) => {
+                pick.count += 1;
+                pick.last_used = now;
+            }
+            None => choices.push(Pick { filepath: filepath.to_string(), count: 1, last_used: now }),
+        }
+        Some(query)
+    }
+
+    /// Score bonuses for the folded query `q`, by file path: a large one for
+    /// what was chosen for exactly these letters, a smaller one for what was
+    /// chosen for a shorter or longer version of them.
+    fn learned_boosts(&self, q: &str, now: i64) -> HashMap<String, f64> {
+        let picks = self.picks.read().unwrap();
+        let mut boosts: HashMap<String, f64> = HashMap::new();
+        for (query, choices) in picks.iter() {
+            let exact = query == q;
+            if !exact && !query.starts_with(q) && !q.starts_with(query.as_str()) {
+                continue;
+            }
+            for pick in choices {
+                let strength = if exact {
+                    EXACT_PICK_BOOST + PICK_REPEAT_BOOST * pick.count.min(10) as f64
+                } else {
+                    RELATED_PICK_BOOST
+                };
+                // A choice made long ago counts for less
+                let fade = if now - pick.last_used > PICK_FADE_SECS { 0.5 } else { 1.0 };
+                let boost = boosts.entry(pick.filepath.clone()).or_default();
+                *boost = boost.max(strength * fade);
+            }
+        }
+        boosts
+    }
+
     pub fn record_click(&self, filepath: &str, now: i64) {
         let mut items = self.items.write().unwrap();
         if let Some(item) = items.iter_mut().find(|i| i.entry.filepath == filepath) {
@@ -187,6 +265,7 @@ pub fn search(index: &SearchIndex, query: &str, max_results: usize) -> Vec<Searc
     let pattern = Pattern::new(query, CaseMatching::Ignore, Normalization::Smart, AtomKind::Fuzzy);
     let mut buf = Vec::new();
 
+    let learned = index.learned_boosts(&q, now);
     let items = index.items.read().unwrap();
     let mut candidates: Vec<(f64, usize, Match)> = Vec::new();
 
@@ -210,8 +289,17 @@ pub fn search(index: &SearchIndex, query: &str, max_results: usize) -> Vec<Searc
             continue;
         };
 
-        let name_matched = !matches!(kind, Match::Path | Match::Fuzzy);
-        candidates.push((base + item.standing(name_matched, now), idx, kind));
+        let app_boost = match kind {
+            Match::Path => 0.0,
+            Match::Fuzzy => APP_GUESS_BOOST,
+            _ => APP_BOOST,
+        };
+        let chosen_before = if learned.is_empty() {
+            0.0
+        } else {
+            learned.get(&item.entry.filepath).copied().unwrap_or(0.0)
+        };
+        candidates.push((base + item.standing(app_boost, now) + chosen_before, idx, kind));
     }
 
     // Best score first; shorter names win ties.
@@ -231,12 +319,29 @@ pub fn search(index: &SearchIndex, query: &str, max_results: usize) -> Vec<Searc
         names_listed.insert(item.name_fold.as_str()) || item.entry.click_count > 0
     });
 
-    // Fuzzy matches are guesses. A few are a safety net for typos; a screenful
-    // of them is noise.
+    // Fuzzy matches are guesses. Only plausible ones are kept (an abbreviation
+    // or a slip of the finger, not letters scattered through a long name), and
+    // only a few: a safety net, not a screenful.
     let mut guesses = 0;
-    candidates.retain(|(_, _, kind)| !matches!(kind, Match::Fuzzy) || {
-        guesses += 1;
-        guesses <= MAX_FUZZY_RESULTS
+    let mut positions = Vec::new();
+    candidates.retain(|(_, idx, kind)| {
+        if !matches!(kind, Match::Fuzzy) {
+            return true;
+        }
+        if guesses >= MAX_FUZZY_RESULTS {
+            return false;
+        }
+        let name = &items[*idx].entry.filename;
+        positions.clear();
+        pattern.indices(Utf32Str::new(name, &mut buf), &mut matcher, &mut positions);
+        positions.sort_unstable();
+        positions.dedup();
+        // Something the user picked for this query before is never a guess
+        let plausible = is_plausible_guess(name, &positions) || learned.contains_key(&items[*idx].entry.filepath);
+        if plausible {
+            guesses += 1;
+        }
+        plausible
     });
     candidates.truncate(max_results);
 
@@ -316,6 +421,38 @@ fn to_result(entry: &FileEntry, score: f64, match_type: &str, matched_indices: V
         matched_indices,
         snippet: String::new(),
     }
+}
+
+/// Whether a fuzzy match looks like something a person meant.
+///
+/// The matched letters form runs. A run that starts a word ("V", "S", "C" in
+/// *Visual Studio Code*; "chr" in *chrome*) is how abbreviations and typos
+/// look. Runs that start in the middle of a word are coincidence, and more
+/// than one of them means the letters are merely scattered through the name.
+/// `positions` are sorted grapheme indices into `name`.
+fn is_plausible_guess(name: &str, positions: &[u32]) -> bool {
+    const MAX_MID_WORD_RUNS: usize = 1;
+
+    // Only the first character of each grapheme matters for word boundaries
+    let chars: Vec<char> = name.graphemes(true).filter_map(|g| g.chars().next()).collect();
+    let starts_word = |i: usize| {
+        i == 0 || !chars[i - 1].is_alphanumeric() || (chars[i - 1].is_lowercase() && chars[i].is_uppercase())
+    };
+
+    let mut mid_word_runs = 0;
+    let mut previous: Option<usize> = None;
+    for &position in positions {
+        let i = position as usize;
+        if i >= chars.len() {
+            return false;
+        }
+        let continues_run = previous.is_some_and(|p| p + 1 == i);
+        if !continues_run && !starts_word(i) {
+            mid_word_runs += 1;
+        }
+        previous = Some(i);
+    }
+    mid_word_runs <= MAX_MID_WORD_RUNS
 }
 
 /// UTF-16 offsets covered by `len` characters of `name` starting at character `start`.
@@ -536,6 +673,77 @@ mod tests {
         let results = search(&index, "invoice", 15);
         assert_eq!(results.len(), MAX_FUZZY_RESULTS);
         assert!(results.iter().all(|r| r.match_type == "fuzzy"));
+    }
+
+    #[test]
+    fn scattered_letters_are_not_offered_as_guesses() {
+        let index = index_of(vec![
+            entry(1, "VSInstallerElevationService.exe", "other"),
+            entry(2, "DesignVersionSwitcher.tsx", "other"),
+            entry(3, "Individual_Contributor_License_Agreement.pdf", "other"),
+        ]);
+        assert!(search(&index, "invoice", 10).is_empty());
+    }
+
+    #[test]
+    fn abbreviations_and_slips_are_still_found() {
+        let index = index_of(vec![
+            entry(1, "Visual Studio Code.lnk", "shortcut"),
+            entry(2, "PowerPoint.lnk", "shortcut"),
+            entry(3, "Google Chrome.lnk", "shortcut"),
+            entry(4, "Photos", "app"),
+        ]);
+        let first = |q: &str| search(&index, q, 10).first().map(|r| r.filename.clone());
+        assert_eq!(first("vsc"), Some("Visual Studio Code.lnk".to_string()));
+        assert_eq!(first("ppt"), Some("PowerPoint.lnk".to_string()));
+        assert_eq!(first("chrme"), Some("Google Chrome.lnk".to_string()));
+        assert_eq!(first("phtos"), Some("Photos".to_string()));
+    }
+
+    #[test]
+    fn a_guessed_app_beats_guessed_program_files() {
+        let index = index_of(vec![
+            at(1, r"C:\Program Files\Google\Chrome\Application\chrome_proxy.exe", "app"),
+            at(2, r"C:\Program Files\Google\Chrome\Application\chrmstp.exe", "app"),
+            at(3, r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Google Chrome.lnk", "shortcut"),
+        ]);
+        assert_eq!(search(&index, "chrme", 10)[0].filename, "Google Chrome.lnk");
+    }
+
+    #[test]
+    fn what_was_chosen_for_a_query_comes_first_next_time() {
+        let index = index_of(vec![
+            at(1, r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Chrome.lnk", "shortcut"),
+            at(2, r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Chess.lnk", "shortcut"),
+            at(3, r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Character Map.lnk", "shortcut"),
+        ]);
+        let now = chrono::Utc::now().timestamp();
+        let top = |q: &str| search(&index, q, 10)[0].filename.clone();
+        assert_eq!(top("ch"), "Chess.lnk", "shortest name first before anything is learned");
+
+        // The user types "ch" and picks Character Map
+        let stored = index.record_pick("  CH ", r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Character Map.lnk", now);
+        assert_eq!(stored.as_deref(), Some("ch"));
+
+        assert_eq!(top("ch"), "Character Map.lnk");
+        assert_eq!(top("c"), "Character Map.lnk", "a shorter version of the letters is nudged too");
+        assert_eq!(top("che"), "Chess.lnk", "but it only applies where it still matches");
+        assert_eq!(index.record_pick("   ", "x", now), None);
+    }
+
+    #[test]
+    fn learned_choices_survive_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("t.db")).unwrap();
+        let now = chrono::Utc::now().timestamp();
+        db.record_pick("ch", r"C:\files\Character Map.lnk", now).unwrap();
+        db.record_pick("ancient", r"C:\files\Chess.lnk", now - PICK_MEMORY_SECS - 10).unwrap();
+
+        let index = index_of(vec![entry(1, "Chess.lnk", "shortcut"), entry(2, "Character Map.lnk", "shortcut")]);
+        index.load_picks(&db, now);
+
+        assert_eq!(search(&index, "ch", 10)[0].filename, "Character Map.lnk");
+        assert_eq!(db.load_picks().unwrap().len(), 1, "the ancient choice was forgotten");
     }
 
     #[test]

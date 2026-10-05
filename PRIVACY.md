@@ -5,7 +5,8 @@ Matchstick is a launcher that runs on your PC. It has no account, no analytics a
 ## What it reads
 
 - **Names and locations of your files and apps.** To search them, Matchstick keeps an index of file names, paths, sizes and dates in `%LOCALAPPDATA%\Matchstick\index.db`. It does not read or store what is inside your files.
-- **What you open through it.** It counts how often and how recently you open each item, so that the things you use most come first. This stays in the same local database.
+- **What you open through it.** It counts how often and how recently you open each item, and remembers which item you chose for the letters you typed (typing "ch" and picking Chrome), so that the things you use most come first. This stays in the same local database; choices not repeated for six months are forgotten.
+- **Windows' list of recently opened files.** Until you have a history in Matchstick, the home view shows files you recently opened in other apps, read from the list Windows keeps for Explorer. It is not copied or stored.
 - **The Windows Search index.** When you search, Matchstick asks Windows which documents contain your words and shows the passage Windows returns. The search runs inside Windows on your PC; Matchstick does not keep those passages.
 - **Titles of open windows**, while you are searching, so it can offer to switch to one. They are not stored.
 

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-06
+
+### Added
+- **Learns what you mean.** Type some letters and pick a result, and those letters put that result first from then on. A shorter or longer version of the same letters gets a smaller nudge. Choices not repeated for six months are forgotten
+- **A home view for new installs.** Until Matchstick has its own history, it shows files recently opened in other apps, from the list Windows keeps
+- The key hints in the footer follow the selected item (for example `Ctrl+Enter` Show in folder), so the shortcuts are visible on the home view too
+
+### Changed
+- **Fuzzy matches are judged by their shape.** A guess is shown only if its letters land on word starts or run together (`vsc` → Visual Studio Code, `chrme` → Chrome), not when they are scattered through a long name
+- A guessed app now ranks above guessed program files
 ## [0.2.2] - 2026-10-05
 
 ### Added
@@ -96,7 +106,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Auto-update support via GitHub Releases
 - Frameless dark-theme UI with blur effect and smooth animations
 
-[Unreleased]: https://github.com/HarshalPatel1972/win-light/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/HarshalPatel1972/win-light/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/HarshalPatel1972/win-light/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/HarshalPatel1972/win-light/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/HarshalPatel1972/win-light/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/HarshalPatel1972/win-light/compare/v0.1.0...v0.2.0

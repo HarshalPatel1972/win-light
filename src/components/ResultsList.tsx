@@ -66,7 +66,11 @@ const ResultsList: React.FC<ResultsListProps> = ({
         <div className="home">
           <div className="home-greeting">{t(greetingKey(new Date().getHours()))}</div>
           <div className="home-sub">
-            {results.length > 0 ? t("pickUp") : t("freshStart")}
+            {results.length === 0
+              ? t("freshStart")
+              : results.some((r) => r.click_count > 0)
+                ? t("pickUp")
+                : t("recentOnPc")}
           </div>
           {results.length === 0 && (
             <div className="home-hint">

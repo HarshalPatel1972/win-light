@@ -85,6 +85,15 @@ impl Database {
                 value TEXT NOT NULL
             );
 
+            -- What the user chose for what they typed (ch -> Chrome)
+            CREATE TABLE IF NOT EXISTS picks (
+                query TEXT NOT NULL,
+                filepath TEXT NOT NULL,
+                count INTEGER NOT NULL DEFAULT 0,
+                last_used INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (query, filepath)
+            );
+
             -- Left over from when searches ran in SQL; they only slow down writes now.
             DROP INDEX IF EXISTS idx_filename;
             DROP INDEX IF EXISTS idx_filepath;
@@ -186,6 +195,30 @@ impl Database {
         Ok(())
     }
 
+    /// Remember that `filepath` was chosen for `query`.
+    pub fn record_pick(&self, query: &str, filepath: &str, now: i64) -> SqlResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO picks (query, filepath, count, last_used) VALUES (?1, ?2, 1, ?3)
+             ON CONFLICT(query, filepath) DO UPDATE SET count = count + 1, last_used = excluded.last_used",
+            params![query, filepath, now],
+        )?;
+        Ok(())
+    }
+
+    /// Every remembered choice: (query, filepath, count, last used).
+    pub fn load_picks(&self) -> SqlResult<Vec<(String, String, i64, i64)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT query, filepath, count, last_used FROM picks")?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?;
+        rows.collect()
+    }
+
+    /// Forget choices not repeated since `before`.
+    pub fn prune_picks(&self, before: i64) -> SqlResult<usize> {
+        self.conn.lock().unwrap().execute("DELETE FROM picks WHERE last_used < ?1", params![before])
+    }
+
     /// Set a metadata key/value pair.
     pub fn set_meta(&self, key: &str, value: &str) -> SqlResult<()> {
         let conn = self.conn.lock().unwrap();
@@ -261,6 +294,24 @@ mod tests {
         assert_eq!(paths(&db), vec![r"C:\a\one.txt", r"C:\a\three.txt"]);
         let one = db.load_all().unwrap().into_iter().find(|e| e.filename == "one.txt").unwrap();
         assert_eq!((one.click_count, one.last_accessed), (1, 42));
+    }
+
+    #[test]
+    fn picks_are_counted_per_query_and_can_be_pruned() {
+        let (_dir, db) = open_temp();
+        db.record_pick("ch", r"C:\a\chrome.lnk", 100).unwrap();
+        db.record_pick("ch", r"C:\a\chrome.lnk", 200).unwrap();
+        db.record_pick("old", r"C:\a\old.txt", 10).unwrap();
+
+        let mut picks = db.load_picks().unwrap();
+        picks.sort();
+        assert_eq!(picks, vec![
+            ("ch".to_string(), r"C:\a\chrome.lnk".to_string(), 2, 200),
+            ("old".to_string(), r"C:\a\old.txt".to_string(), 1, 10),
+        ]);
+
+        assert_eq!(db.prune_picks(50).unwrap(), 1);
+        assert_eq!(db.load_picks().unwrap().len(), 1);
     }
 
     #[test]
