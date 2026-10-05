@@ -10,15 +10,8 @@ use windows::Win32::System::Power::SetSuspendState;
 use windows::Win32::System::Shutdown::LockWorkStation;
 use windows::Win32::UI::Shell::{SHEmptyRecycleBinW, SHERB_NOCONFIRMATION, SHERB_NOPROGRESSUI, SHERB_NOSOUND};
 
-/// (id, name). The id is what follows `command:` in the entry's path.
-const SYSTEM_COMMANDS: &[(&str, &str)] = &[
-    ("lock", "Lock"),
-    ("sleep", "Sleep"),
-    ("signout", "Sign out"),
-    ("restart", "Restart"),
-    ("shutdown", "Shut down"),
-    ("emptybin", "Empty Recycle Bin"),
-];
+/// The ids that follow `command:` in an entry's path. Their names are in `strings`.
+const SYSTEM_COMMANDS: &[&str] = &["lock", "sleep", "signout", "restart", "shutdown", "emptybin"];
 
 /// (page, name). The page is what follows `ms-settings:`.
 const SETTINGS_PAGES: &[(&str, &str)] = &[
@@ -53,9 +46,13 @@ fn entry(path: String, name: &str) -> IndexEntry {
     }
 }
 
-/// Every built-in command, as index entries.
-pub fn entries() -> Vec<IndexEntry> {
-    let system = SYSTEM_COMMANDS.iter().map(|(id, name)| entry(format!("{}{}", COMMAND_PREFIX, id), name));
+/// Every built-in command, as index entries, named in `language`.
+/// (Settings pages keep their English names for now.)
+pub fn entries(language: &str) -> Vec<IndexEntry> {
+    let system = SYSTEM_COMMANDS.iter().map(|id| {
+        let name = crate::strings::text(&format!("command.{}", id), language);
+        entry(format!("{}{}", COMMAND_PREFIX, id), name)
+    });
     let settings = SETTINGS_PAGES.iter().map(|(page, name)| entry(format!("{}{}", SETTINGS_PREFIX, page), name));
     system.chain(settings).collect()
 }
@@ -103,7 +100,7 @@ mod tests {
 
     #[test]
     fn every_command_is_indexed_with_a_unique_path() {
-        let all = entries();
+        let all = entries("en");
         assert_eq!(all.len(), SYSTEM_COMMANDS.len() + SETTINGS_PAGES.len());
         let paths: std::collections::HashSet<&str> = all.iter().map(|e| e.filepath.as_str()).collect();
         assert_eq!(paths.len(), all.len());
@@ -117,8 +114,10 @@ mod tests {
         // Checked without running them: an unknown id is the only "not implemented" path.
         assert!(run("definitely-not-a-command").unwrap_err().contains("Unknown command"));
         let implemented = ["lock", "sleep", "signout", "restart", "shutdown", "emptybin"];
-        for (id, _) in SYSTEM_COMMANDS {
+        for id in SYSTEM_COMMANDS {
             assert!(implemented.contains(id), "{} has no implementation", id);
         }
+        // ...and has a name in another language
+        assert!(entries("de").iter().any(|e| e.filename == "Sperren" && e.filepath == "command:lock"));
     }
 }

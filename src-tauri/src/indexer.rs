@@ -26,11 +26,35 @@ pub struct Root {
     /// things in, only this many levels are indexed. A profile is mostly
     /// tool caches and package stores, and none of that should be searchable.
     pub shallow_depth: Option<usize>,
+    /// Folders the user asked to keep out of the index (lowercase paths).
+    pub excluded: Arc<Vec<String>>,
+}
+
+/// What the user has asked to be indexed beyond, or kept out of, the defaults.
+#[derive(Debug, Clone, Default)]
+pub struct IndexOptions {
+    /// Extra folders to index in full.
+    pub include: Vec<String>,
+    /// Folders never to index, wherever they are.
+    pub exclude: Vec<String>,
+    /// Interface language, for the names of built-in commands.
+    pub language: String,
 }
 
 impl Root {
     fn new(path: PathBuf, apps_only: bool, max_depth: usize) -> Self {
-        Root { path, apps_only, max_depth, shallow_depth: None }
+        Root { path, apps_only, max_depth, shallow_depth: None, excluded: Arc::default() }
+    }
+
+    /// Whether the user excluded `path` or a folder above it.
+    fn is_excluded(&self, path: &Path) -> bool {
+        if self.excluded.is_empty() {
+            return false;
+        }
+        let path = path.to_string_lossy().to_lowercase();
+        self.excluded.iter().any(|folder| {
+            path.strip_prefix(folder.as_str()).is_some_and(|rest| rest.is_empty() || rest.starts_with('\\'))
+        })
     }
 
     /// How deep `rel` (a path relative to this root) may be indexed.
@@ -99,7 +123,7 @@ pub fn classify_file(extension: &str, filepath: &str, is_dir: bool) -> String {
 }
 
 /// Collects all directories that should be indexed.
-pub fn index_roots() -> Vec<Root> {
+pub fn index_roots(options: &IndexOptions) -> Vec<Root> {
     let mut roots: Vec<Root> = Vec::new();
     let home = dirs::home_dir();
     // `inside_home` folders are skipped when the home scan already covers them.
@@ -140,8 +164,25 @@ pub fn index_roots() -> Vec<Root> {
         }
     }
 
+    // Folders the user added are indexed in full, wherever they are
+    for folder in &options.include {
+        add(Some(PathBuf::from(folder)), false, HOME_DEPTH, false);
+    }
+
     if let Some(profile) = roots.iter_mut().find(|root| Some(&root.path) == home.as_ref()) {
         profile.shallow_depth = Some(PROFILE_SHALLOW_DEPTH);
+    }
+
+    let excluded = Arc::new(
+        options
+            .exclude
+            .iter()
+            .map(|folder| folder.trim_end_matches('\\').to_lowercase())
+            .filter(|folder| !folder.is_empty())
+            .collect::<Vec<_>>(),
+    );
+    for root in &mut roots {
+        root.excluded = excluded.clone();
     }
     roots
 }
@@ -220,6 +261,10 @@ fn make_entry(root: &Root, path: &Path, metadata: &Metadata) -> Option<IndexEntr
         return None;
     }
 
+    if root.is_excluded(path) {
+        return None;
+    }
+
     let is_dir = metadata.is_dir();
 
     // Anything below a skipped directory is out; so is a skipped directory itself.
@@ -288,7 +333,10 @@ fn scan_tree(root: &Root, start: &Path, out: &mut Vec<IndexEntry>) {
                 .path()
                 .strip_prefix(&root.path)
                 .is_ok_and(|rel| rel.components().count() >= root.depth_for(rel));
-            !hidden && !too_deep && !should_skip_dir(&entry.file_name().to_string_lossy())
+            !hidden
+                && !too_deep
+                && !root.is_excluded(entry.path())
+                && !should_skip_dir(&entry.file_name().to_string_lossy())
         });
 
     for entry in walker {
@@ -321,14 +369,14 @@ fn scan_tree(root: &Root, start: &Path, out: &mut Vec<IndexEntry>) {
 }
 
 /// Scan every root plus the installed Store apps.
-fn scan_all(roots: &[Root]) -> Vec<IndexEntry> {
+fn scan_all(roots: &[Root], language: &str) -> Vec<IndexEntry> {
     let mut entries = Vec::new();
     for root in roots {
         info!("Indexing directory: {}", root.path.display());
         scan_tree(root, &root.path, &mut entries);
     }
     entries.extend(apps::list_store_apps());
-    entries.extend(crate::commands::entries());
+    entries.extend(crate::commands::entries(language));
     drop_programs_that_have_a_shortcut(&mut entries);
     entries
 }
@@ -350,7 +398,7 @@ fn drop_programs_that_have_a_shortcut(entries: &mut Vec<IndexEntry>) {
 /// Whether anything at `path` is ruled out by a skipped folder on the way to
 /// it. Works on the path alone, so it also answers for files that are gone.
 fn is_under_skipped_dir(root: &Root, path: &Path) -> bool {
-    path.strip_prefix(&root.path).is_ok_and(|rel| {
+    root.is_excluded(path) || path.strip_prefix(&root.path).is_ok_and(|rel| {
         rel.components().any(|c| should_skip_dir(&c.as_os_str().to_string_lossy()))
     })
 }
@@ -359,7 +407,7 @@ fn is_under_skipped_dir(root: &Root, path: &Path) -> bool {
 /// entries. Takes well under a second, unlike a full scan.
 pub fn quick_app_entries() -> Vec<crate::db::FileEntry> {
     let mut entries = Vec::new();
-    for root in index_roots() {
+    for root in index_roots(&IndexOptions::default()) {
         if root.path.to_string_lossy().to_lowercase().contains("start menu") {
             scan_tree(&root, &root.path, &mut entries);
         }
@@ -388,11 +436,11 @@ const VACUUM_THRESHOLD: usize = 10_000;
 /// Performs a full scan and makes the database and the in-memory index match
 /// it exactly (new files added, vanished files dropped).
 /// Returns the number of entries indexed.
-pub fn full_index(db: &Database, index: &SearchIndex) -> Result<usize, String> {
-    let roots = index_roots();
+pub fn full_index(db: &Database, index: &SearchIndex, options: &IndexOptions) -> Result<usize, String> {
+    let roots = index_roots(options);
     info!("Starting full index of {} directories", roots.len());
 
-    let entries = scan_all(&roots);
+    let entries = scan_all(&roots, &options.language);
     let removed = db
         .replace_all(&entries)
         .map_err(|e| format!("Failed to store index: {}", e))?;
@@ -473,12 +521,16 @@ fn apply_changes(roots: &[Root], db: &Database, index: &SearchIndex, changed: Ha
 /// Watch the indexed directories and apply changes as they happen, so new
 /// files are searchable within a second without rescanning the disk.
 /// `on_update` is called after each applied batch.
+///
+/// Watching lasts as long as the returned watcher is kept; dropping it (for
+/// example to start a new one after the indexed folders changed) ends it.
 pub fn start_watcher(
     db: Arc<Database>,
     index: Arc<SearchIndex>,
+    options: &IndexOptions,
     on_update: impl Fn() + Send + 'static,
-) -> notify::Result<()> {
-    let roots = index_roots();
+) -> notify::Result<notify::RecommendedWatcher> {
+    let roots = index_roots(options);
     let root_count = roots.len();
     let (tx, rx) = mpsc::channel::<PathBuf>();
 
@@ -504,8 +556,7 @@ pub fn start_watcher(
     std::thread::Builder::new()
         .name("index-watcher".to_string())
         .spawn(move || {
-            // The watcher stops when dropped, so it lives as long as this thread.
-            let _watcher = watcher;
+            // Ends by itself when the watcher (which holds the sending side) is dropped
             while let Ok(first) = rx.recv() {
                 let started = Instant::now();
                 let mut changed = HashSet::from([first]);
@@ -524,7 +575,7 @@ pub fn start_watcher(
         .map_err(notify::Error::io)?;
 
     info!("Watching {} directories for changes", root_count);
-    Ok(())
+    Ok(watcher)
 }
 
 #[cfg(test)]
@@ -546,6 +597,29 @@ mod tests {
 
     fn open_db(dir: &Path) -> Database {
         Database::open(&dir.join("index.db")).unwrap()
+    }
+
+    #[test]
+    fn excluded_folders_are_left_out_with_everything_inside_them() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        fs::create_dir_all(base.join("private").join("deep")).unwrap();
+        fs::create_dir_all(base.join("private-not")).unwrap();
+        fs::write(base.join("private").join("secret.txt"), "x").unwrap();
+        fs::write(base.join("private").join("deep").join("more.txt"), "x").unwrap();
+        fs::write(base.join("private-not").join("visible.txt"), "x").unwrap();
+        fs::write(base.join("open.txt"), "x").unwrap();
+
+        let mut root = Root::new(base.to_path_buf(), false, 6);
+        // Stored lowercase, matched whatever the case on disk
+        root.excluded = Arc::new(vec![base.join("PRIVATE").to_string_lossy().to_lowercase()]);
+        let found = names(&scan(&root));
+
+        assert!(found.contains(&"open.txt".to_string()));
+        assert!(found.contains(&"visible.txt".to_string()), "a folder that merely starts the same is not excluded");
+        assert!(!found.contains(&"private".to_string()));
+        assert!(!found.contains(&"secret.txt".to_string()));
+        assert!(!found.contains(&"more.txt".to_string()));
     }
 
     #[test]

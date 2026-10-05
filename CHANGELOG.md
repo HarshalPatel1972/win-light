@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-05
+
+### Added
+- **Choose what is indexed:** add extra folders or exclude folders in Settings, with the Windows folder picker. Changes apply immediately
+- **Privacy:** a plain statement of what is read, stored and sent (`PRIVACY.md`), linked from Settings
+- **Help:** "Report a problem" and "Open log folder" in Settings; a diagnostic log is kept in the data folder
+- Tray menu and system command names follow the interface language
+- Screen-reader labels for the search box, results and status line
+
+### Changed
+- **Installing Matchstick removes AnCheck**, its former name, and cleans up the data it left behind. Launch history is carried over
+- The launcher opens on the monitor the mouse is on
+- Muted text is darker in the light theme and lighter in the dark theme for better contrast
+
 ## [0.2.0] - 2026-10-05
 
 ### Added
@@ -76,6 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Auto-update support via GitHub Releases
 - Frameless dark-theme UI with blur effect and smooth animations
 
-[Unreleased]: https://github.com/HarshalPatel1972/win-light/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/HarshalPatel1972/win-light/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/HarshalPatel1972/win-light/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/HarshalPatel1972/win-light/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/HarshalPatel1972/win-light/releases/tag/v0.1.0

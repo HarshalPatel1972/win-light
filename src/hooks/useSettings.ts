@@ -10,6 +10,8 @@ export interface Settings {
   language: string;
   search_engine: string;
   quick_links: QuickLink[];
+  include_folders: string[];
+  exclude_folders: string[];
   launch_at_login: boolean;
   version: string;
 }
@@ -21,6 +23,8 @@ const DEFAULTS: Settings = {
   language: "auto",
   search_engine: "google",
   quick_links: [],
+  include_folders: [],
+  exclude_folders: [],
   launch_at_login: false,
   version: "",
 };
@@ -107,5 +111,21 @@ export function useSettings() {
     [refresh],
   );
 
-  return { settings, setHotkey, setLaunchAtLogin, setAppearance, setSearchEngine, setQuickLinks };
+  const setIndexFolders = useCallback(
+    async (include: string[], exclude: string[]) => {
+      await invoke("set_index_folders", { include, exclude });
+      await refresh();
+    },
+    [refresh],
+  );
+
+  return {
+    settings,
+    setHotkey,
+    setLaunchAtLogin,
+    setAppearance,
+    setSearchEngine,
+    setQuickLinks,
+    setIndexFolders,
+  };
 }

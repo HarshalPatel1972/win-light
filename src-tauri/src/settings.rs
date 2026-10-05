@@ -17,6 +17,10 @@ pub struct Settings {
     pub search_engine: String,
     /// Keyword shortcuts to websites, e.g. "yt cats" searches YouTube.
     pub quick_links: Vec<QuickLink>,
+    /// Extra folders to index in full.
+    pub include_folders: Vec<String>,
+    /// Folders never to index.
+    pub exclude_folders: Vec<String>,
 }
 
 /// A keyword that sends the rest of the query to a website.
@@ -54,6 +58,8 @@ impl Default for Settings {
             language: "auto".to_string(),
             search_engine: "google".to_string(),
             quick_links: default_quick_links(),
+            include_folders: Vec::new(),
+            exclude_folders: Vec::new(),
         }
     }
 }
@@ -84,7 +90,7 @@ mod tests {
 
         assert_eq!(Settings::load(&path), Settings::default());
 
-        let custom = Settings { hotkey: "Alt+Space".into(), theme: "light".into(), language: "de".into(), search_engine: "bing".into(), quick_links: vec![] };
+        let custom = Settings { hotkey: "Alt+Space".into(), theme: "light".into(), language: "de".into(), search_engine: "bing".into(), quick_links: vec![], include_folders: vec![r"D:\Work".into()], exclude_folders: vec![] };
         custom.save(&path).unwrap();
         assert_eq!(Settings::load(&path), custom);
 

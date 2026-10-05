@@ -29,8 +29,15 @@ const NOTICE_MS = 1600;
 function App() {
   const { query, setQuery, results, contentResults, windowResults, answer, isLoading, clearSearch } =
     useSearch(50);
-  const { settings, setHotkey, setLaunchAtLogin, setAppearance, setSearchEngine, setQuickLinks } =
-    useSettings();
+  const {
+    settings,
+    setHotkey,
+    setLaunchAtLogin,
+    setAppearance,
+    setSearchEngine,
+    setQuickLinks,
+    setIndexFolders,
+  } = useSettings();
   // A command that cannot be undone waits here for a second Enter
   const [awaitingConfirm, setAwaitingConfirm] = useState<string | null>(null);
   const [view, setView] = useState<"search" | "settings">("search");
@@ -282,6 +289,7 @@ function App() {
         setAppearance={setAppearance}
         setSearchEngine={setSearchEngine}
         setQuickLinks={setQuickLinks}
+        setIndexFolders={setIndexFolders}
         indexCount={indexCount}
         isIndexing={isIndexing}
         availableUpdate={availableUpdate}
@@ -299,13 +307,14 @@ function App() {
           onClear={clearSearch}
           onKeyDown={handleSearchKeyDown}
           isLoading={isLoading}
+          activeResultId={items.length > 0 ? `result-${selectedIndex}` : undefined}
         />
 
         {/* A line of light under the search bar; it travels while indexing */}
         <div className={`beam-line ${isIndexing ? "active" : ""}`} />
 
         {/* Status bar */}
-        <div className="status-bar">
+        <div className="status-bar" role="status" aria-live="polite">
           {launchError ? (
             <span className="error">{launchError}</span>
           ) : notice ? (

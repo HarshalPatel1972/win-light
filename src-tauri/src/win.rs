@@ -10,7 +10,11 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
-use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+use windows::Win32::System::Com::CoTaskMemFree;
+use windows::Win32::UI::Shell::{
+    FileOpenDialog, IFileOpenDialog, IShellLinkW, ShellLink, FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS,
+    SIGDN_FILESYSPATH,
+};
 
 /// Prefix of the launch target stored for packaged (Store) apps.
 pub const APPS_FOLDER_PREFIX: &str = "shell:AppsFolder\\";
@@ -71,6 +75,23 @@ pub fn shortcut_target(lnk_path: &str) -> Option<String> {
         link.GetPath(&mut buffer, std::ptr::null_mut(), 0).ok()?;
         let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
         (len > 0).then(|| String::from_utf16_lossy(&buffer[..len]))
+    }
+}
+
+/// Let the user choose a folder with the standard Windows dialog.
+/// Returns None if they cancel.
+pub fn pick_folder() -> Option<String> {
+    let _com = ComGuard::new();
+    unsafe {
+        let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+        let options = dialog.GetOptions().ok()?;
+        dialog.SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM).ok()?;
+        // Cancelling is reported as an error
+        dialog.Show(HWND::default()).ok()?;
+        let raw = dialog.GetResult().ok()?.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let path = raw.to_string().ok();
+        CoTaskMemFree(Some(raw.0 as *const _));
+        path
     }
 }
 

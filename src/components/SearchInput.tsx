@@ -7,6 +7,8 @@ interface SearchInputProps {
   onClear: () => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
   isLoading: boolean;
+  /** Element id of the highlighted result, announced by screen readers. */
+  activeResultId?: string;
 }
 
 /** The search input bar at the top of the launcher. */
@@ -16,6 +18,7 @@ const SearchInput: React.FC<SearchInputProps> = ({
   onClear,
   onKeyDown,
   isLoading,
+  activeResultId,
 }) => {
   const t = useT();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -58,6 +61,11 @@ const SearchInput: React.FC<SearchInputProps> = ({
           onChange={(e) => onQueryChange(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder={t("searchPlaceholder")}
+          aria-label={t("searchPlaceholder")}
+          role="combobox"
+          aria-expanded="true"
+          aria-controls="results"
+          aria-activedescendant={activeResultId}
           autoFocus
           spellCheck={false}
           autoComplete="off"

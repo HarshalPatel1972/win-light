@@ -13,7 +13,7 @@
   --surface-hover: rgba(255, 255, 255, 0.07);
   --text-primary: #f4f0e8;
   --text-secondary: #aeabb8;
-  --text-muted: #73707f;
+  --text-muted: #8c8998;
   --line: rgba(255, 255, 255, 0.08);
   --light: #ffc46b;
   --ember: #ff8f6b;
@@ -44,7 +44,7 @@
   --surface-hover: rgba(28, 22, 12, 0.075);
   --text-primary: #1d1a16;
   --text-secondary: #5b564e;
-  --text-muted: #8b857b;
+  --text-muted: #736c61;
   --line: rgba(28, 22, 12, 0.1);
   --light: #c2620a;
   --ember: #d9482b;
@@ -787,6 +787,40 @@ button.math-result {
 .button.remove {
   padding: 6px 10px;
   color: var(--text-muted);
+}
+
+/* ── Folder lists (Settings) ── */
+.folder-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.folder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.folder-path {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.button-group {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 /* ── Footer Hints ── */

@@ -77,10 +77,22 @@ Open with `Ctrl+,`, the ⚙ button in the footer, or the tray menu.
 - **Start with Windows** — on by default for installed builds; the app starts hidden in the tray.
 - **Theme** — System, Dark or Light.
 - **Language** — Automatic (follows Windows) or a fixed language.
+- **Web search and keyword shortcuts** — pick the search engine; edit shortcuts such as `yt`, `gh`, `wiki`.
+- **Extra folders / Folders to leave out** — decide what is searchable.
 - **Index** — rebuild on demand.
 - **Updates** — check and install.
 
 Settings are stored in `%LOCALAPPDATA%\Matchstick\settings.json`.
+
+---
+
+## Privacy
+
+Your files and searches stay on your PC. There is no account, no analytics and no telemetry. The only network requests are the exchange-rate table (when you type a currency conversion), the update check, and web searches you choose to open. Details: [PRIVACY.md](PRIVACY.md).
+
+## Coming from AnCheck?
+
+Matchstick is AnCheck under a new name. Installing Matchstick removes AnCheck and keeps your launch history; you do not need both.
 
 ---
 
