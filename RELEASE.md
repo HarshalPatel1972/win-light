@@ -129,6 +129,18 @@ git push origin main --tags
 
 ---
 
+## Windows code signing (not set up yet)
+
+The installers are not code-signed, so Windows SmartScreen warns on first run. To fix that:
+
+1. Get a signing identity. The cheapest route is [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/); the alternative is an OV or EV certificate from a certificate authority.
+2. Add a `signCommand` under `bundle.windows` in `src-tauri/tauri.conf.json` that signs the file passed as `%1` (for Trusted Signing: the `trusted-signing-cli` tool; for a certificate: `signtool`).
+3. Add the credentials the command needs as repository secrets and pass them to the "Build Tauri app" step in `.github/workflows/release.yml`.
+
+This is separate from the updater key below, which only proves that an update came from this project.
+
+Before announcing a release, run through [docs/release-checklist.md](docs/release-checklist.md).
+
 ## GitHub Secrets Setup
 
 Navigate to **Settings → Secrets and variables → Actions** in the GitHub repository and add:

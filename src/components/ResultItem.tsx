@@ -184,6 +184,7 @@ const ResultItem: React.FC<ResultItemProps> = ({
       onClick={() => onSelect(index)}
       onContextMenu={handleContextMenu}
       onMouseEnter={() => onHover(index)}
+      id={`result-${index}`}
       role="option"
       aria-selected={isSelected}
       title={hasFolder ? t("openFolderHint") : undefined}

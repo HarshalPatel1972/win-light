@@ -60,7 +60,7 @@ const ResultsList: React.FC<ResultsListProps> = ({
   const [beforeHotkey, afterHotkey] = t("toggleHint").split("{hotkey}");
 
   return (
-    <div className="results-container" ref={containerRef} role="listbox">
+    <div className="results-container" id="results" ref={containerRef} role="listbox">
       {/* Home: a greeting and the things the user comes back to */}
       {isHome && (
         <div className="home">

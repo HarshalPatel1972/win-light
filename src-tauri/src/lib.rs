@@ -8,6 +8,7 @@ mod intro;
 mod launcher;
 mod searcher;
 mod settings;
+mod strings;
 mod win;
 mod windows_list;
 mod winsearch;
@@ -60,6 +61,33 @@ pub struct AppState {
     pub found_paths: Mutex<HashSet<String>>,
     /// Exchange rates for currency conversion.
     pub rates: calc::Rates,
+    /// The running file watcher; replaced when the indexed folders change.
+    pub watcher: Mutex<Option<notify::RecommendedWatcher>>,
+    /// Tray menu entries and the text key of each, so they can be re-labelled
+    /// when the language changes.
+    pub tray_items: Mutex<Vec<(&'static str, tauri::menu::MenuItem<tauri::Wry>)>>,
+    /// Set while a system dialog of ours is open, so losing focus to it does
+    /// not hide the launcher.
+    pub keep_open: AtomicBool,
+    /// Where the index, settings and log live.
+    pub data_dir: PathBuf,
+}
+
+impl AppState {
+    /// The interface language as a supported language code.
+    fn language(&self) -> &'static str {
+        strings::resolve_language(&self.settings.lock().unwrap().language)
+    }
+
+    /// What to index, according to the current settings.
+    fn index_options(&self) -> indexer::IndexOptions {
+        let settings = self.settings.lock().unwrap();
+        indexer::IndexOptions {
+            include: settings.include_folders.clone(),
+            exclude: settings.exclude_folders.clone(),
+            language: strings::resolve_language(&settings.language).to_string(),
+        }
+    }
 }
 
 /// Directory holding the index database and settings.
@@ -75,20 +103,50 @@ fn app_data_dir() -> PathBuf {
     path
 }
 
-/// The app used to be called AnCheck. On the first run under the new name,
-/// carry its index over so the user's launch history is not lost.
-fn migrate_legacy_index(db_path: &std::path::Path) {
-    if db_path.exists() || std::env::var_os("MATCHSTICK_DATA_DIR").is_some() {
+/// The app used to be called AnCheck. Carry its index over so the user's
+/// launch history is not lost, then remove what the old app left behind:
+/// Matchstick replaces it, and its data folder is dead weight.
+fn migrate_legacy_data(db_path: &std::path::Path) {
+    if std::env::var_os("MATCHSTICK_DATA_DIR").is_some() {
         return;
     }
     let Some(local) = dirs::data_local_dir() else { return };
-    let legacy = local.join("AnCheck").join("ancheck_index.db");
-    if legacy.exists() {
-        match std::fs::copy(&legacy, db_path) {
-            Ok(_) => info!("Imported the index from the previous AnCheck install"),
-            Err(e) => warn!("Could not import the AnCheck index: {}", e),
-        }
+    let legacy_dir = local.join("AnCheck");
+    if !legacy_dir.is_dir() {
+        return;
     }
+
+    let legacy_db = legacy_dir.join("ancheck_index.db");
+    if !db_path.exists() && legacy_db.exists() {
+        if let Err(e) = std::fs::copy(&legacy_db, db_path) {
+            // Keep the old data: it is the only copy
+            warn!("Could not import the AnCheck index: {}", e);
+            return;
+        }
+        info!("Imported the index from the previous AnCheck install");
+    }
+    match std::fs::remove_dir_all(&legacy_dir) {
+        Ok(()) => info!("Removed the old AnCheck data folder"),
+        Err(e) => warn!("Could not remove the old AnCheck data folder: {}", e),
+    }
+}
+
+/// Write the log to a file in the data folder, so a problem on someone
+/// else's PC leaves something to look at. Starts afresh once it grows large.
+fn init_logging(data_dir: &std::path::Path) {
+    const MAX_LOG_BYTES: u64 = 1_000_000;
+    let path = data_dir.join("matchstick.log");
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > MAX_LOG_BYTES) {
+        let _ = std::fs::remove_file(&path);
+    }
+
+    let mut builder = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+    if let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        builder.target(env_logger::Target::Pipe(Box::new(file)));
+    }
+    builder.init();
+
+    std::panic::set_hook(Box::new(|panic| error!("Crashed: {}", panic)));
 }
 
 // ────────────────────── Search & launch commands ──────────────────────
@@ -415,8 +473,8 @@ async fn run_full_index(app: &AppHandle) -> Result<usize, String> {
     }
     let _ = app.emit("indexing-started", ());
 
-    let (db, index) = (state.db.clone(), state.index.clone());
-    let result = tokio::task::spawn_blocking(move || indexer::full_index(&db, &index))
+    let (db, index, options) = (state.db.clone(), state.index.clone(), state.index_options());
+    let result = tokio::task::spawn_blocking(move || indexer::full_index(&db, &index, &options))
         .await
         .map_err(|e| format!("Index task failed: {}", e))
         .and_then(|r| r);
@@ -449,6 +507,20 @@ async fn is_indexing(state: tauri::State<'_, AppState>) -> Result<bool, String> 
     Ok(state.indexing.load(Ordering::SeqCst))
 }
 
+/// (Re)start watching the indexed folders, replacing any earlier watcher.
+fn restart_watcher(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let notify_handle = app.clone();
+    let started = indexer::start_watcher(state.db.clone(), state.index.clone(), &state.index_options(), move || {
+        let _ = notify_handle.emit("index-updated", ());
+    });
+    match started {
+        // Storing the new watcher drops the old one, which ends its thread
+        Ok(watcher) => *state.watcher.lock().unwrap() = Some(watcher),
+        Err(e) => error!("Failed to start file watcher: {}", e),
+    }
+}
+
 /// Index at startup, then rebuild periodically as a safety net for the watcher.
 fn start_background_indexer(app: &AppHandle) {
     let app = app.clone();
@@ -471,6 +543,8 @@ struct SettingsView {
     language: String,
     search_engine: String,
     quick_links: Vec<settings::QuickLink>,
+    include_folders: Vec<String>,
+    exclude_folders: Vec<String>,
     launch_at_login: bool,
     version: String,
 }
@@ -485,6 +559,8 @@ async fn get_settings(app: AppHandle, state: tauri::State<'_, AppState>) -> Resu
         language: settings.language,
         search_engine: settings.search_engine,
         quick_links: settings.quick_links,
+        include_folders: settings.include_folders,
+        exclude_folders: settings.exclude_folders,
         launch_at_login: app.autolaunch().is_enabled().unwrap_or(false),
         version: app.package_info().version.to_string(),
     })
@@ -542,11 +618,81 @@ async fn set_launch_at_login(app: AppHandle, enabled: bool) -> Result<(), String
 }
 
 #[tauri::command]
-async fn set_appearance(state: tauri::State<'_, AppState>, theme: String, language: String) -> Result<(), String> {
-    let mut settings = state.settings.lock().unwrap();
-    settings.theme = theme;
-    settings.language = language;
-    settings.save(&state.settings_path)
+async fn set_appearance(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    theme: String,
+    language: String,
+) -> Result<(), String> {
+    let language_changed = {
+        let mut settings = state.settings.lock().unwrap();
+        let changed = settings.language != language;
+        settings.theme = theme;
+        settings.language = language;
+        settings.save(&state.settings_path)?;
+        changed
+    };
+
+    // The tray menu and the command names are worded in the interface language
+    if language_changed {
+        relabel_tray(&state);
+        tauri::async_runtime::spawn(async move {
+            let _ = run_full_index(&app).await;
+        });
+    }
+    Ok(())
+}
+
+/// Tidy a list of folders from the settings screen: no blanks, no duplicates,
+/// no trailing separators.
+fn clean_folders(folders: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    folders
+        .into_iter()
+        .map(|folder| folder.trim().trim_end_matches('\\').to_string())
+        .filter(|folder| !folder.is_empty() && seen.insert(folder.to_lowercase()))
+        .collect()
+}
+
+/// Change which folders are indexed in addition to, or kept out of, the defaults.
+#[tauri::command]
+async fn set_index_folders(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    include: Vec<String>,
+    exclude: Vec<String>,
+) -> Result<(), String> {
+    {
+        let mut settings = state.settings.lock().unwrap();
+        settings.include_folders = clean_folders(include);
+        settings.exclude_folders = clean_folders(exclude);
+        settings.save(&state.settings_path)?;
+    }
+    restart_watcher(&app);
+    tauri::async_runtime::spawn(async move {
+        let _ = run_full_index(&app).await;
+    });
+    Ok(())
+}
+
+/// Let the user choose a folder. Returns None if they cancel.
+#[tauri::command]
+async fn pick_folder(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<Option<String>, String> {
+    // The dialog takes focus; do not treat that as "the user left"
+    state.keep_open.store(true, Ordering::SeqCst);
+    let picked = tokio::task::spawn_blocking(win::pick_folder).await;
+    state.keep_open.store(false, Ordering::SeqCst);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    picked.map_err(|e| format!("Folder picker failed: {}", e))
+}
+
+/// Open the folder that holds the log, for attaching to a problem report.
+#[tauri::command]
+async fn open_data_folder(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    launcher::launch(&state.data_dir.to_string_lossy(), launcher::Verb::Default)
 }
 
 #[tauri::command]
@@ -645,9 +791,22 @@ fn start_update_checker(app: &AppHandle) {
 
 // ────────────────────── App Setup ──────────────────────
 
+/// Centre the launcher on the monitor the mouse is on, which is where the
+/// user is working, rather than always on the main display.
+fn place_on_active_monitor(app: &AppHandle, window: &tauri::WebviewWindow) {
+    let Ok(cursor) = app.cursor_position() else { return };
+    let Ok(Some(monitor)) = app.monitor_from_point(cursor.x, cursor.y) else { return };
+    let Ok(size) = window.outer_size() else { return };
+    let (origin, area) = (monitor.position(), monitor.size());
+    let x = origin.x + (area.width as i32 - size.width as i32) / 2;
+    let y = origin.y + (area.height as i32 - size.height as i32) / 2;
+    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+}
+
 /// Show the launcher and put the cursor in the search box.
 fn show_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        place_on_active_monitor(app, &window);
         let _ = window.show();
         let _ = window.set_focus();
         // Notify frontend to focus the search input
@@ -666,12 +825,29 @@ fn toggle_window(app: &AppHandle) {
     }
 }
 
+/// Word the tray menu in the current interface language.
+fn relabel_tray(state: &AppState) {
+    let language = state.language();
+    for (key, item) in state.tray_items.lock().unwrap().iter() {
+        let _ = item.set_text(strings::text(key, language));
+    }
+}
+
 /// Set up the system tray icon and menu.
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let show_item = MenuItemBuilder::with_id("show", "Show Launcher").build(app)?;
-    let settings_item = MenuItemBuilder::with_id("settings", "Settings…").build(app)?;
-    let rebuild_item = MenuItemBuilder::with_id("rebuild", "Rebuild Index").build(app)?;
-    let exit_item = MenuItemBuilder::with_id("exit", "Exit").build(app)?;
+    let state = app.state::<AppState>();
+    let language = state.language();
+    let item = |id: &str, key: &'static str| MenuItemBuilder::with_id(id, strings::text(key, language)).build(app);
+    let show_item = item("show", "tray.show")?;
+    let settings_item = item("settings", "tray.settings")?;
+    let rebuild_item = item("rebuild", "tray.rebuild")?;
+    let exit_item = item("exit", "tray.exit")?;
+    *state.tray_items.lock().unwrap() = vec![
+        ("tray.show", show_item.clone()),
+        ("tray.settings", settings_item.clone()),
+        ("tray.rebuild", rebuild_item.clone()),
+        ("tray.exit", exit_item.clone()),
+    ];
 
     let menu = MenuBuilder::new(app)
         .item(&show_item)
@@ -722,11 +898,10 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-
     let data_dir = app_data_dir();
+    init_logging(&data_dir);
     let db_path = data_dir.join("index.db");
-    migrate_legacy_index(&db_path);
+    migrate_legacy_data(&db_path);
     let settings_path = data_dir.join("settings.json");
     info!("Database path: {}", db_path.display());
 
@@ -755,6 +930,10 @@ pub fn run() {
         available_update: Mutex::new(None),
         found_paths: Mutex::new(HashSet::new()),
         rates: calc::Rates::load(data_dir.join("rates.json")),
+        watcher: Mutex::new(None),
+        tray_items: Mutex::new(Vec::new()),
+        keep_open: AtomicBool::new(false),
+        data_dir,
     };
 
     tauri::Builder::default()
@@ -803,6 +982,9 @@ pub fn run() {
             set_hotkey,
             set_launch_at_login,
             set_appearance,
+            set_index_folders,
+            pick_folder,
+            open_data_folder,
             check_for_update,
             get_available_update,
             install_update,
@@ -837,9 +1019,12 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 // Hide window on focus lost
                 let win = window.clone();
+                let focus_handle = handle.clone();
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::Focused(false) = event {
-                        let _ = win.hide();
+                        if !focus_handle.state::<AppState>().keep_open.load(Ordering::SeqCst) {
+                            let _ = win.hide();
+                        }
                     }
                 });
             }
@@ -850,12 +1035,7 @@ pub fn run() {
             }
 
             // Keep the index current as files come and go
-            let watcher_handle = handle.clone();
-            if let Err(e) = indexer::start_watcher(state.db.clone(), state.index.clone(), move || {
-                let _ = watcher_handle.emit("index-updated", ());
-            }) {
-                error!("Failed to start file watcher: {}", e);
-            }
+            restart_watcher(&handle);
 
             start_background_indexer(&handle);
             start_update_checker(&handle);

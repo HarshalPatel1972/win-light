@@ -3,6 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { LANGUAGES, useT } from "../i18n";
 import type { QuickLink } from "../actions";
 import QuickLinksEditor from "./QuickLinksEditor";
+import FolderList from "./FolderList";
+
+const REPO = "https://github.com/HarshalPatel1972/win-light";
 import { formatHotkey, type Settings as SettingsData } from "../hooks/useSettings";
 
 interface SettingsProps {
@@ -12,6 +15,7 @@ interface SettingsProps {
   setAppearance: (theme: string, language: string) => Promise<void>;
   setSearchEngine: (engine: string) => Promise<void>;
   setQuickLinks: (links: QuickLink[]) => Promise<void>;
+  setIndexFolders: (include: string[], exclude: string[]) => Promise<void>;
   indexCount: number;
   isIndexing: boolean;
   availableUpdate: string | null;
@@ -43,6 +47,7 @@ const Settings: React.FC<SettingsProps> = ({
   setAppearance,
   setSearchEngine,
   setQuickLinks,
+  setIndexFolders,
   indexCount,
   isIndexing,
   availableUpdate,
@@ -208,6 +213,30 @@ const Settings: React.FC<SettingsProps> = ({
           <QuickLinksEditor links={settings.quick_links} onSave={setQuickLinks} />
         </div>
 
+        <div className="settings-row stacked">
+          <div className="settings-label">
+            <span>{t("indexedFolders")}</span>
+            <span className="settings-hint">{t("indexedFoldersHelp")}</span>
+          </div>
+          <FolderList
+            name="include"
+            folders={settings.include_folders}
+            onChange={(folders) => setIndexFolders(folders, settings.exclude_folders).catch(console.error)}
+          />
+        </div>
+
+        <div className="settings-row stacked">
+          <div className="settings-label">
+            <span>{t("excludedFolders")}</span>
+            <span className="settings-hint">{t("excludedFoldersHelp")}</span>
+          </div>
+          <FolderList
+            name="exclude"
+            folders={settings.exclude_folders}
+            onChange={(folders) => setIndexFolders(settings.include_folders, folders).catch(console.error)}
+          />
+        </div>
+
         <div className="settings-row">
           <div className="settings-label">
             <span>{t("index")}</span>
@@ -244,6 +273,37 @@ const Settings: React.FC<SettingsProps> = ({
               {checking ? t("checking") : t("checkForUpdates")}
             </button>
           )}
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-label">
+            <span>{t("privacy")}</span>
+            <span className="settings-hint">{t("privacyText")}</span>
+          </div>
+          <button
+            className="button"
+            onClick={() => invoke("open_url", { url: `${REPO}/blob/main/PRIVACY.md` }).catch(console.error)}
+          >
+            {t("readMore")}
+          </button>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-label">
+            <span>{t("help")}</span>
+            <span className="settings-hint">{t("helpText")}</span>
+          </div>
+          <div className="button-group">
+            <button className="button" onClick={() => invoke("open_data_folder").catch(console.error)}>
+              {t("openLogs")}
+            </button>
+            <button
+              className="button"
+              onClick={() => invoke("open_url", { url: `${REPO}/issues/new` }).catch(console.error)}
+            >
+              {t("reportProblem")}
+            </button>
+          </div>
         </div>
       </div>
     </div>
