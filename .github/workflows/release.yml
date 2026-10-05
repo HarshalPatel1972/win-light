@@ -73,3 +73,15 @@ jobs:
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
+
+      # The Microsoft Store edition: the same executable in an MSIX package.
+      # It is uploaded to Partner Center by hand; the Store signs it.
+      - name: Build Microsoft Store package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+        run: |
+          $version = $env:TAG.TrimStart('v')
+          ./scripts/build-msix.ps1 -Version $version -Exe src-tauri/target/release/matchstick.exe -OutDir msix
+          gh release upload $env:TAG "msix/Matchstick_${version}_x64.msix" --clobber

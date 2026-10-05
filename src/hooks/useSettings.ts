@@ -14,6 +14,8 @@ export interface Settings {
   exclude_folders: string[];
   launch_at_login: boolean;
   version: string;
+  /** Installed from the Microsoft Store, which then handles updates. */
+  store_edition: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -27,6 +29,7 @@ const DEFAULTS: Settings = {
   exclude_folders: [],
   launch_at_login: false,
   version: "",
+  store_edition: false,
 };
 
 /** Make a shortcut such as "Ctrl+KeyK" readable: "Ctrl+K". */

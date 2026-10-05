@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Manifest of the Microsoft Store (MSIX) edition of Matchstick.
+
+  Identity Name, Publisher and PublisherDisplayName are the values Partner
+  Center shows under Product management > Product identity; they must match
+  exactly or the upload is rejected. {VERSION} is filled in by
+  scripts/build-msix.ps1.
+
+  The app is an ordinary desktop program, so it runs with full trust: it needs
+  to read file names across the user's folders, register a global shortcut and
+  start other programs, none of which a sandboxed app may do.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap desktop rescap">
+
+  <Identity
+    Name="HarshalPatel.MatchstickLauncher"
+    Publisher="CN=D0A3C2BD-CE15-44CD-99D1-ECB6BCADA5F4"
+    Version="{VERSION}"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>Matchstick Launcher</DisplayName>
+    <PublisherDisplayName>Harshal Patel</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+    <Resource Language="es" />
+    <Resource Language="fr" />
+    <Resource Language="de" />
+    <Resource Language="pt-br" />
+    <Resource Language="hi" />
+    <Resource Language="zh-hans" />
+    <Resource Language="ja" />
+  </Resources>
+
+  <Applications>
+    <Application Id="Matchstick" Executable="matchstick.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="Matchstick Launcher"
+        Description="Strike a match, find anything on your PC: apps, files, documents, answers."
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <!-- Start with Windows, in the tray. The id is used by src-tauri/src/store.rs. -->
+        <desktop:Extension Category="windows.startupTask" Executable="matchstick.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="MatchstickStartup" Enabled="true" DisplayName="Matchstick" />
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

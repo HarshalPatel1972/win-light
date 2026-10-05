@@ -30,3 +30,6 @@ src-tauri/.tauri-private.key.password
 
 # Build output
 src-tauri/target/
+
+# Local Store package builds
+/msix/
