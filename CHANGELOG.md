@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-05
+
 ### Added
 - Settings screen (`Ctrl+,`, footer button or tray menu): launcher shortcut, start with Windows, theme, language
 - Microsoft Store / packaged apps (Calculator, Settings, …) are indexed and launchable
@@ -74,5 +76,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Auto-update support via GitHub Releases
 - Frameless dark-theme UI with blur effect and smooth animations
 
-[Unreleased]: https://github.com/HarshalPatel1972/win-light/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/HarshalPatel1972/win-light/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/HarshalPatel1972/win-light/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/HarshalPatel1972/win-light/releases/tag/v0.1.0

@@ -1,10 +1,12 @@
-# Matchstick — Spotlight-like Search Launcher for Windows
+# Matchstick — strike a match, find anything on your PC
 
 [![Build](https://github.com/HarshalPatel1972/win-light/actions/workflows/build.yml/badge.svg)](https://github.com/HarshalPatel1972/win-light/actions/workflows/build.yml)
 [![Release](https://github.com/HarshalPatel1972/win-light/releases/latest)](https://github.com/HarshalPatel1972/win-light/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A fast, native desktop search launcher built with **Rust + Tauri v2** and **React + TypeScript**. Press `Ctrl+Space` from anywhere to instantly search and launch apps, files, and folders.
+A fast, native search launcher for Windows, built with **Rust + Tauri v2** and **React + TypeScript**. Press `Ctrl+Space` from anywhere to find and open apps, files, documents by their contents, open windows, system commands and quick answers.
+
+> **Beta.** The installers are not code-signed yet, so Windows shows a "Windows protected your PC" prompt on first run: choose **More info → Run anyway**.
 
 ---
 
@@ -29,11 +31,17 @@ Go to the [**Releases**](https://github.com/HarshalPatel1972/win-light/releases/
 ## Features
 
 - **Global Hotkey** — `Ctrl+Space` toggles the launcher from any application (changeable in Settings)
-- **Fast File Indexing** — Indexes Start Menu, Store apps, Program Files, Desktop, Documents, Downloads
+- **Fast File Indexing** — Indexes apps (Start Menu and Store), your user folder and other internal drives, in seconds
 - **Live Index** — A file-system watcher picks up new, renamed and deleted files within a second
+- **Search Inside Documents** — Finds files by what is written in them, through the Windows Search index, and shows the matching passage
 - **Fuzzy Search** — Multi-strategy matching: exact → prefix → substring → fuzzy, in memory
-- **Smart Ranking** — Boosts apps, frequently-used items, and recently-opened files
-- **Calculator** — Type math expressions like `2+2` or `(100/5)*3` for instant results
+- **Smart Ranking** — Apps first, then what you use most and touched recently; each file name listed once
+- **Answers** — Maths (`2^10`, `15% of 240`), units (`5 km to miles`, `100 f in c`) and currency (`120 usd in inr`)
+- **Preview Pane** — Thumbnail, details and the opening lines of text files for the selected result
+- **Actions** — Show in folder, run as administrator, open with, copy path
+- **System Commands** — Lock, sleep, restart, shut down, empty recycle bin, and Windows Settings pages
+- **Open Windows** — Switch to something already running instead of starting a second copy
+- **Web** — Keyword shortcuts (`yt lofi beats`), typed addresses, and a web search when nothing local matches
 - **System Tray** — Runs quietly in the tray with right-click menu; starts with Windows
 - **Keyboard-First** — Full navigation with ↑↓, Enter, Esc, Ctrl+1-9 quick-launch
 - **Auto-Updates** — Checks GitHub Releases at startup and every 6 hours; one-click install
@@ -52,6 +60,10 @@ Go to the [**Releases**](https://github.com/HarshalPatel1972/win-light/releases/
 | `Esc` | Close launcher |
 | `Tab` / `Shift+Tab` | Cycle through results |
 | `Ctrl+1` – `Ctrl+9` | Quick-launch first 9 results |
+| `Ctrl+Enter` | Show the selected item in its folder |
+| `Ctrl+Shift+Enter` | Run as administrator |
+| `Ctrl+O` | Open with… |
+| `Ctrl+Shift+C` | Copy the selected item's path |
 | `Ctrl+,` | Open Settings |
 | Right-click result | Open containing folder |
 
