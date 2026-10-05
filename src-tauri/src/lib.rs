@@ -6,6 +6,7 @@ mod icons;
 mod indexer;
 mod intro;
 mod launcher;
+mod recent;
 mod searcher;
 mod settings;
 mod store;
@@ -164,10 +165,49 @@ async fn search(state: tauri::State<'_, AppState>, query: String) -> Result<Vec<
         .map_err(|e| format!("Search task failed: {}", e))
 }
 
-/// The items the user opens most, for the home view shown before typing.
+/// How many items the home view offers.
+const SUGGESTIONS: usize = 6;
+
+/// What the home view shows before anything is typed: the items the user opens
+/// most through Matchstick, topped up with files recently opened anywhere on
+/// the PC so that a new install is not an empty page.
 #[tauri::command]
 async fn get_suggestions(state: tauri::State<'_, AppState>) -> Result<Vec<SearchResult>, String> {
-    Ok(searcher::suggestions(&state.index, 6))
+    let mut suggestions = searcher::suggestions(&state.index, SUGGESTIONS);
+    if suggestions.len() >= SUGGESTIONS {
+        return Ok(suggestions);
+    }
+
+    let missing = SUGGESTIONS - suggestions.len();
+    let recent = tokio::task::spawn_blocking(move || recent::recent_files(SUGGESTIONS * 2))
+        .await
+        .unwrap_or_default();
+
+    let mut found = state.found_paths.lock().unwrap();
+    let already: HashSet<String> = suggestions.iter().map(|s| s.filepath.to_lowercase()).collect();
+    let fresh = recent.into_iter().filter(|(path, _)| !already.contains(&path.to_lowercase())).take(missing);
+    for (i, (path, opened)) in fresh.enumerate() {
+        let file = std::path::Path::new(&path);
+        let extension = file.extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
+        // Recent files may lie outside the index; allow them to be opened
+        found.insert(path.clone());
+        suggestions.push(SearchResult {
+            id: -2000 - i as i64,
+            filename: file.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+            file_type: indexer::classify_file(&extension, &path, false),
+            filepath: path,
+            extension,
+            file_size: 0,
+            modified_at: 0,
+            click_count: 0,
+            last_accessed: opened,
+            score: 0.0,
+            match_type: "recent".to_string(),
+            matched_indices: Vec::new(),
+            snippet: String::new(),
+        });
+    }
+    Ok(suggestions)
 }
 
 /// The user's own apps and files, for the first-run story.
@@ -251,11 +291,13 @@ fn ensure_known(state: &AppState, filepath: &str) -> Result<(), String> {
 
 /// Launch a file/app at the given path and record the click.
 /// `mode` is "admin" to run elevated or "open_with" to choose the app.
+/// `query` is what was typed to find it, so the same letters find it first next time.
 #[tauri::command]
 async fn launch_file(
     state: tauri::State<'_, AppState>,
     filepath: String,
     mode: Option<String>,
+    query: Option<String>,
 ) -> Result<(), String> {
     ensure_known(&state, &filepath)?;
     let verb = match mode.as_deref() {
@@ -274,6 +316,12 @@ async fn launch_file(
         index.record_click(&filepath, now);
         if let Err(e) = db.record_click(&filepath, now) {
             error!("Failed to record click: {}", e);
+        }
+        // Learn the choice: these letters meant this item
+        if let Some(learned) = query.and_then(|q| index.record_pick(&q, &filepath, now)) {
+            if let Err(e) = db.record_pick(&learned, &filepath, now) {
+                error!("Failed to record choice: {}", e);
+            }
         }
         Ok(())
     })
@@ -945,6 +993,7 @@ pub fn run() {
     if let Err(e) = index.reload(&db) {
         error!("{}", e);
     }
+    index.load_picks(&db, chrono::Utc::now().timestamp());
 
     let app_state = AppState {
         db,

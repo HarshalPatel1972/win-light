@@ -11,6 +11,8 @@ import { useSearch, type SearchResult } from "./hooks/useSearch";
 import { useKeyboardNav } from "./hooks/useKeyboardNav";
 import { formatHotkey, useSettings } from "./hooks/useSettings";
 import {
+  ACTION_KEYS,
+  ACTION_LABEL,
   actionFromKey,
   actionsFor,
   isWebItem,
@@ -150,13 +152,14 @@ function App() {
             await invoke("open_containing_folder", { filepath: item.filepath });
             break;
           case "admin":
-            await invoke("launch_file", { filepath: item.filepath, mode: "admin" });
+            await invoke("launch_file", { filepath: item.filepath, mode: "admin", query });
             break;
           case "openWith":
-            await invoke("launch_file", { filepath: item.filepath, mode: "open_with" });
+            await invoke("launch_file", { filepath: item.filepath, mode: "open_with", query });
             break;
           default:
-            await invoke("launch_file", { filepath: item.filepath });
+            // Passing what was typed lets the app learn: these letters meant this item
+            await invoke("launch_file", { filepath: item.filepath, query });
         }
         await dismiss();
       } catch (error) {
@@ -267,6 +270,11 @@ function App() {
     };
   }, [refreshSuggestions]);
 
+  // The footer names the shortcuts for the selected item; three fit comfortably
+  const footerActions = selected
+    ? actionsFor(selected).filter((action) => action !== "openWith").slice(0, 3)
+    : [];
+
   // A closer look at the selected result, once the user is searching
   const previewed =
     !isHome &&
@@ -361,20 +369,30 @@ function App() {
           )}
         </div>
 
-        {/* Footer with keyboard hints */}
+        {/* Footer: what the keys do for the selected item, wherever it is shown */}
         <div className="footer">
           <span>
             <kbd>↑↓</kbd> {t("navigate")}
           </span>
-          <span>
-            <kbd>Enter</kbd> {t("open")}
-          </span>
-          <span>
-            <kbd>Esc</kbd> {t("close")}
-          </span>
-          <span>
-            <kbd>Ctrl+1-9</kbd> {t("quickLaunch")}
-          </span>
+          {selected && footerActions.length > 1 ? (
+            footerActions.map((action) => (
+              <span key={action}>
+                <kbd>{ACTION_KEYS[action]}</kbd> {t(ACTION_LABEL[action])}
+              </span>
+            ))
+          ) : (
+            <>
+              <span>
+                <kbd>Enter</kbd> {t("open")}
+              </span>
+              <span>
+                <kbd>Esc</kbd> {t("close")}
+              </span>
+              <span>
+                <kbd>Ctrl+1-9</kbd> {t("quickLaunch")}
+              </span>
+            </>
+          )}
           <button
             className="footer-button"
             onClick={() => setView("settings")}
