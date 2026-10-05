@@ -26,6 +26,7 @@ dist-ssr
 # Tauri signing keys (NEVER commit these)
 src-tauri/.tauri-private.key
 src-tauri/.tauri-private.key.pub
+src-tauri/.tauri-private.key.password
 
 # Build output
 src-tauri/target/
