@@ -13,51 +13,65 @@ export interface SearchResult {
   click_count: number;
   last_accessed: number;
   score: number;
+  /** "exact", "prefix", "substring", "fuzzy", "path", "content" or "web" */
   match_type: string;
   matched_indices: number[];
+  /** For matches inside a document: the passage that matched. */
+  snippet: string;
 }
+
+/** A calculation or conversion answered directly. */
+export interface Answer {
+  value: string;
+  /** "calculator", "unit" or "currency" */
+  kind: string;
+  /** What was asked, normalised (e.g. "5 km"); empty for plain arithmetic. */
+  detail: string;
+}
+
+/** Searching inside documents is slower than matching names, so it waits for a pause in typing. */
+const CONTENT_DEBOUNCE_MS = 220;
+const CONTENT_MIN_CHARS = 3;
 
 /**
  * Custom hook that manages search state:
  * - Debounced query dispatch to Rust backend
- * - Math expression evaluation
+ * - Instant answers (maths, conversions)
+ * - Matches inside documents, which arrive a moment after the name matches
  * - Loading state
  */
 export function useSearch(debounceMs: number = 50) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
-  const [mathResult, setMathResult] = useState<string | null>(null);
+  const [contentResults, setContentResults] = useState<SearchResult[]>([]);
+  const [windowResults, setWindowResults] = useState<SearchResult[]>([]);
+  const [answer, setAnswer] = useState<Answer | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef(0); // generation counter to ignore stale results
 
   const performSearch = useCallback(async (q: string, generation: number) => {
-    if (!q.trim()) {
-      setResults([]);
-      setMathResult(null);
-      setIsLoading(false);
-      return;
-    }
-
     setIsLoading(true);
 
     try {
-      // Run search and math eval in parallel
-      const [searchResults, mathEval] = await Promise.all([
+      // Run search and the answer engine in parallel
+      const [searchResults, answered, openWindows] = await Promise.all([
         invoke<SearchResult[]>("search", { query: q }),
-        invoke<string | null>("eval_math", { query: q }),
+        invoke<Answer | null>("eval_math", { query: q }),
+        invoke<SearchResult[]>("search_windows", { query: q }).catch(() => []),
       ]);
 
       // Only update if this is still the latest generation
       if (generation === abortRef.current) {
         setResults(searchResults);
-        setMathResult(mathEval);
+        setAnswer(answered);
+        setWindowResults(openWindows);
       }
     } catch (error) {
       console.error("Search error:", error);
       if (generation === abortRef.current) {
         setResults([]);
-        setMathResult(null);
+        setAnswer(null);
       }
     } finally {
       if (generation === abortRef.current) {
@@ -71,22 +85,41 @@ export function useSearch(debounceMs: number = 50) {
       clearTimeout(timerRef.current);
     }
 
-    if (!query.trim()) {
+    const generation = ++abortRef.current;
+    const trimmed = query.trim();
+
+    if (!trimmed) {
       setResults([]);
-      setMathResult(null);
+      setContentResults([]);
+      setWindowResults([]);
+      setAnswer(null);
       setIsLoading(false);
       return;
     }
-
-    const generation = ++abortRef.current;
 
     timerRef.current = setTimeout(() => {
       performSearch(query, generation);
     }, debounceMs);
 
+    // Matches inside documents follow once typing pauses
+    setContentResults([]);
+    const contentTimer =
+      trimmed.length >= CONTENT_MIN_CHARS
+        ? setTimeout(() => {
+            invoke<SearchResult[]>("search_content", { query })
+              .then((found) => {
+                if (generation === abortRef.current) setContentResults(found);
+              })
+              .catch((error) => console.error("Content search error:", error));
+          }, CONTENT_DEBOUNCE_MS)
+        : null;
+
     return () => {
       if (timerRef.current !== null) {
         clearTimeout(timerRef.current);
+      }
+      if (contentTimer !== null) {
+        clearTimeout(contentTimer);
       }
     };
   }, [query, debounceMs, performSearch]);
@@ -94,7 +127,9 @@ export function useSearch(debounceMs: number = 50) {
   const clearSearch = useCallback(() => {
     setQuery("");
     setResults([]);
-    setMathResult(null);
+    setContentResults([]);
+    setWindowResults([]);
+    setAnswer(null);
     setIsLoading(false);
   }, []);
 
@@ -102,7 +137,9 @@ export function useSearch(debounceMs: number = 50) {
     query,
     setQuery,
     results,
-    mathResult,
+    contentResults,
+    windowResults,
+    answer,
     isLoading,
     clearSearch,
   };

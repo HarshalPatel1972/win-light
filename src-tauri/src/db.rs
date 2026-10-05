@@ -1,10 +1,20 @@
 use rusqlite::{params, Connection, Result as SqlResult};
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Mutex;
 
+/// A file discovered by the indexer, ready to be written to the database.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IndexEntry {
+    pub filename: String,
+    pub filepath: String,
+    pub extension: String,
+    pub file_size: i64,
+    pub modified_at: i64,
+    pub file_type: String, // "app", "document", "folder", "shortcut", "other"
+}
+
 /// Represents a single indexed file entry stored in SQLite.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct FileEntry {
     pub id: i64,
     pub filename: String,
@@ -12,29 +22,38 @@ pub struct FileEntry {
     pub extension: String,
     pub file_size: i64,
     pub modified_at: i64,
-    pub file_type: String, // "app", "document", "folder", "shortcut", "other"
+    pub file_type: String,
     pub click_count: i64,
     pub last_accessed: i64,
-    pub icon_path: Option<String>,
 }
 
 /// Thread-safe database wrapper.
+///
+/// The database is the persistent store only; searches run against the
+/// in-memory `SearchIndex`, so nothing on the search path waits on this lock.
 pub struct Database {
     conn: Mutex<Connection>,
 }
 
+const UPSERT_SQL: &str =
+    "INSERT INTO files (filename, filepath, extension, file_size, modified_at, file_type)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+     ON CONFLICT(filepath) DO UPDATE SET
+        filename = excluded.filename,
+        extension = excluded.extension,
+        file_size = excluded.file_size,
+        modified_at = excluded.modified_at,
+        file_type = excluded.file_type";
+
 impl Database {
     /// Open or create the SQLite database at the given path.
-    pub fn open(db_path: &PathBuf) -> SqlResult<Self> {
+    pub fn open(db_path: &Path) -> SqlResult<Self> {
         let conn = Connection::open(db_path)?;
 
-        // Performance tunings for search-heavy workload
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
-             PRAGMA cache_size = -64000;
-             PRAGMA temp_store = MEMORY;
-             PRAGMA mmap_size = 268435456;",
+             PRAGMA temp_store = MEMORY;",
         )?;
 
         let db = Database {
@@ -61,163 +80,110 @@ impl Database {
                 icon_path TEXT
             );
 
-            CREATE INDEX IF NOT EXISTS idx_filename ON files(filename);
-            CREATE INDEX IF NOT EXISTS idx_filepath ON files(filepath);
-            CREATE INDEX IF NOT EXISTS idx_extension ON files(extension);
-            CREATE INDEX IF NOT EXISTS idx_file_type ON files(file_type);
-            CREATE INDEX IF NOT EXISTS idx_click_count ON files(click_count DESC);
-            CREATE INDEX IF NOT EXISTS idx_modified_at ON files(modified_at DESC);
-
             CREATE TABLE IF NOT EXISTS index_meta (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
-            );",
+            );
+
+            -- Left over from when searches ran in SQL; they only slow down writes now.
+            DROP INDEX IF EXISTS idx_filename;
+            DROP INDEX IF EXISTS idx_filepath;
+            DROP INDEX IF EXISTS idx_extension;
+            DROP INDEX IF EXISTS idx_file_type;
+            DROP INDEX IF EXISTS idx_click_count;
+            DROP INDEX IF EXISTS idx_modified_at;",
         )?;
         Ok(())
     }
 
-    /// Insert or update a file entry (upsert based on filepath).
-    pub fn upsert_file(
-        &self,
-        filename: &str,
-        filepath: &str,
-        extension: &str,
-        file_size: i64,
-        modified_at: i64,
-        file_type: &str,
-    ) -> SqlResult<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO files (filename, filepath, extension, file_size, modified_at, file_type)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(filepath) DO UPDATE SET
-                filename = excluded.filename,
-                file_size = excluded.file_size,
-                modified_at = excluded.modified_at,
-                file_type = excluded.file_type",
-            params![filename, filepath, extension, file_size, modified_at, file_type],
-        )?;
-        Ok(())
-    }
-
-    /// Batch insert/upsert multiple file entries in a single transaction.
-    pub fn upsert_files_batch(&self, entries: &[(String, String, String, i64, i64, String)]) -> SqlResult<()> {
+    /// Insert or update file entries in a single transaction.
+    /// Usage data (click count, last accessed) of existing rows is kept.
+    pub fn upsert_files_batch(&self, entries: &[IndexEntry]) -> SqlResult<()> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
         {
-            let mut stmt = tx.prepare_cached(
-                "INSERT INTO files (filename, filepath, extension, file_size, modified_at, file_type)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                 ON CONFLICT(filepath) DO UPDATE SET
-                    filename = excluded.filename,
-                    file_size = excluded.file_size,
-                    modified_at = excluded.modified_at,
-                    file_type = excluded.file_type",
-            )?;
-            for (filename, filepath, extension, file_size, modified_at, file_type) in entries {
-                stmt.execute(params![filename, filepath, extension, file_size, modified_at, file_type])?;
+            let mut stmt = tx.prepare_cached(UPSERT_SQL)?;
+            for e in entries {
+                stmt.execute(params![
+                    e.filename,
+                    e.filepath,
+                    e.extension,
+                    e.file_size,
+                    e.modified_at,
+                    e.file_type
+                ])?;
             }
         }
         tx.commit()?;
         Ok(())
     }
 
-    /// Search files using SQL LIKE for prefix/substring matching.
-    /// Returns up to `limit` results sorted by relevance.
-    pub fn search_files(&self, query: &str, limit: usize) -> SqlResult<Vec<FileEntry>> {
-        let conn = self.conn.lock().unwrap();
-        let like_pattern = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
-        let prefix_pattern = format!("{}%", query.replace('%', "\\%").replace('_', "\\_"));
+    /// Make the table match a complete scan: upsert every entry and drop
+    /// every row the scan did not see. Returns the number of rows removed.
+    pub fn replace_all(&self, entries: &[IndexEntry]) -> SqlResult<usize> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let removed;
+        {
+            tx.execute_batch(
+                "CREATE TEMP TABLE IF NOT EXISTS seen (filepath TEXT PRIMARY KEY) WITHOUT ROWID;
+                 DELETE FROM seen;",
+            )?;
+            let mut upsert = tx.prepare_cached(UPSERT_SQL)?;
+            let mut mark = tx.prepare_cached("INSERT OR IGNORE INTO seen (filepath) VALUES (?1)")?;
+            for e in entries {
+                upsert.execute(params![
+                    e.filename,
+                    e.filepath,
+                    e.extension,
+                    e.file_size,
+                    e.modified_at,
+                    e.file_type
+                ])?;
+                mark.execute(params![e.filepath])?;
+            }
+            removed = tx.execute(
+                "DELETE FROM files WHERE filepath NOT IN (SELECT filepath FROM seen)",
+                [],
+            )?;
+            tx.execute("DELETE FROM seen", [])?;
+        }
+        tx.commit()?;
+        Ok(removed)
+    }
 
-        // Union query: exact matches first, then prefix, then substring,
-        // all boosted by click_count and recency.
-        let sql = "
-            SELECT id, filename, filepath, extension, file_size, modified_at,
-                   file_type, click_count, last_accessed, icon_path,
-                   CASE
-                       WHEN LOWER(filename) = LOWER(?1) THEN 100
-                       WHEN LOWER(filename) LIKE LOWER(?2) ESCAPE '\\' THEN 75
-                       WHEN LOWER(filename) LIKE LOWER(?3) ESCAPE '\\' THEN 50
-                       WHEN LOWER(filepath) LIKE LOWER(?3) ESCAPE '\\' THEN 25
-                       ELSE 0
-                   END AS match_score
-            FROM files
-            WHERE LOWER(filename) LIKE LOWER(?3) ESCAPE '\\'
-               OR LOWER(filepath) LIKE LOWER(?3) ESCAPE '\\'
-            ORDER BY
-                match_score DESC,
-                CASE file_type
-                    WHEN 'app' THEN 5
-                    WHEN 'shortcut' THEN 4
-                    WHEN 'document' THEN 3
-                    WHEN 'folder' THEN 2
-                    ELSE 1
-                END DESC,
-                click_count DESC,
-                last_accessed DESC,
-                modified_at DESC
-            LIMIT ?4
-        ";
+    /// Give the space of deleted rows back to the file system.
+    pub fn vacuum(&self) -> SqlResult<()> {
+        self.conn.lock().unwrap().execute_batch("VACUUM")
+    }
 
-        let mut stmt = conn.prepare(sql)?;
-        let rows = stmt.query_map(params![query, prefix_pattern, like_pattern, limit as i64], |row| {
-            Ok(FileEntry {
-                id: row.get(0)?,
-                filename: row.get(1)?,
-                filepath: row.get(2)?,
-                extension: row.get(3)?,
-                file_size: row.get(4)?,
-                modified_at: row.get(5)?,
-                file_type: row.get(6)?,
-                click_count: row.get(7)?,
-                last_accessed: row.get(8)?,
-                icon_path: row.get(9)?,
-            })
-        })?;
-
-        let mut results = Vec::new();
-        for row in rows {
-            if let Ok(entry) = row {
-                results.push(entry);
+    /// Remove the given paths and everything beneath them.
+    pub fn delete_paths(&self, paths: &[String]) -> SqlResult<usize> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let mut removed = 0usize;
+        {
+            let mut stmt = tx.prepare_cached(
+                "DELETE FROM files
+                 WHERE filepath = ?1 OR substr(filepath, 1, length(?2)) = ?2",
+            )?;
+            for path in paths {
+                let prefix = format!("{}\\", path.trim_end_matches('\\'));
+                removed += stmt.execute(params![path, prefix])?;
             }
         }
-        Ok(results)
+        tx.commit()?;
+        Ok(removed)
     }
 
     /// Increment the click count and update last_accessed time for a file.
-    pub fn record_click(&self, filepath: &str) -> SqlResult<()> {
+    pub fn record_click(&self, filepath: &str, now: i64) -> SqlResult<()> {
         let conn = self.conn.lock().unwrap();
-        let now = chrono::Utc::now().timestamp();
         conn.execute(
             "UPDATE files SET click_count = click_count + 1, last_accessed = ?1 WHERE filepath = ?2",
             params![now, filepath],
         )?;
         Ok(())
-    }
-
-    /// Remove entries whose files no longer exist on disk.
-    pub fn remove_missing_files(&self) -> SqlResult<usize> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT filepath FROM files")?;
-        let paths: Vec<String> = stmt
-            .query_map([], |row| row.get(0))?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        let mut removed = 0usize;
-        for path in &paths {
-            if !std::path::Path::new(path).exists() {
-                conn.execute("DELETE FROM files WHERE filepath = ?1", params![path])?;
-                removed += 1;
-            }
-        }
-        Ok(removed)
-    }
-
-    /// Get the total number of indexed files.
-    pub fn file_count(&self) -> SqlResult<i64> {
-        let conn = self.conn.lock().unwrap();
-        conn.query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))
     }
 
     /// Set a metadata key/value pair.
@@ -231,53 +197,15 @@ impl Database {
         Ok(())
     }
 
-    /// Get a metadata value by key.
-    pub fn get_meta(&self, key: &str) -> SqlResult<Option<String>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT value FROM index_meta WHERE key = ?1")?;
-        let result = stmt.query_row(params![key], |row| row.get(0));
-        match result {
-            Ok(val) => Ok(Some(val)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e),
-        }
-    }
-
-    /// Get all file entries (for fuzzy matching in memory).
-    pub fn get_all_filenames(&self) -> SqlResult<Vec<(i64, String, String, String, i64, i64, i64)>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, filename, filepath, file_type, click_count, last_accessed, modified_at FROM files"
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-                row.get(5)?,
-                row.get(6)?,
-            ))
-        })?;
-        let mut result = Vec::new();
-        for row in rows {
-            if let Ok(entry) = row {
-                result.push(entry);
-            }
-        }
-        Ok(result)
-    }
-
-    /// Get a single file entry by id.
-    pub fn get_file_by_id(&self, id: i64) -> SqlResult<Option<FileEntry>> {
+    /// Load every indexed entry (used to build the in-memory search index).
+    pub fn load_all(&self) -> SqlResult<Vec<FileEntry>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, filename, filepath, extension, file_size, modified_at,
-                    file_type, click_count, last_accessed, icon_path
-             FROM files WHERE id = ?1",
+                    file_type, click_count, last_accessed
+             FROM files",
         )?;
-        let result = stmt.query_row(params![id], |row| {
+        let rows = stmt.query_map([], |row| {
             Ok(FileEntry {
                 id: row.get(0)?,
                 filename: row.get(1)?,
@@ -288,13 +216,66 @@ impl Database {
                 file_type: row.get(6)?,
                 click_count: row.get(7)?,
                 last_accessed: row.get(8)?,
-                icon_path: row.get(9)?,
             })
-        });
-        match result {
-            Ok(entry) => Ok(Some(entry)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e),
+        })?;
+        rows.collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(path: &str) -> IndexEntry {
+        IndexEntry {
+            filename: path.rsplit('\\').next().unwrap().to_string(),
+            filepath: path.to_string(),
+            extension: String::new(),
+            file_size: 1,
+            modified_at: 1,
+            file_type: "other".to_string(),
         }
+    }
+
+    fn open_temp() -> (tempfile::TempDir, Database) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("test.db")).unwrap();
+        (dir, db)
+    }
+
+    fn paths(db: &Database) -> Vec<String> {
+        let mut p: Vec<String> = db.load_all().unwrap().into_iter().map(|e| e.filepath).collect();
+        p.sort();
+        p
+    }
+
+    #[test]
+    fn replace_all_removes_unseen_and_keeps_usage() {
+        let (_dir, db) = open_temp();
+        db.replace_all(&[entry(r"C:\a\one.txt"), entry(r"C:\a\two.txt")]).unwrap();
+        db.record_click(r"C:\a\one.txt", 42).unwrap();
+
+        let removed = db.replace_all(&[entry(r"C:\a\one.txt"), entry(r"C:\a\three.txt")]).unwrap();
+
+        assert_eq!(removed, 1);
+        assert_eq!(paths(&db), vec![r"C:\a\one.txt", r"C:\a\three.txt"]);
+        let one = db.load_all().unwrap().into_iter().find(|e| e.filename == "one.txt").unwrap();
+        assert_eq!((one.click_count, one.last_accessed), (1, 42));
+    }
+
+    #[test]
+    fn delete_paths_removes_children_but_not_siblings() {
+        let (_dir, db) = open_temp();
+        db.upsert_files_batch(&[
+            entry(r"C:\a\dir"),
+            entry(r"C:\a\dir\child.txt"),
+            entry(r"C:\a\dir2\other.txt"),
+        ])
+        .unwrap();
+
+        let removed = db.delete_paths(&[r"C:\a\dir".to_string()]).unwrap();
+
+        assert_eq!(removed, 2);
+        assert_eq!(paths(&db), vec![r"C:\a\dir2\other.txt"]);
     }
 }

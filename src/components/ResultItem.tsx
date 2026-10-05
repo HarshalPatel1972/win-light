@@ -1,9 +1,12 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useContext } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { SearchResult } from "../hooks/useSearch";
+import { useIcon } from "../hooks/useIcon";
+import { STORE_APP_PREFIX, isVirtualPath, isWebItem, isWindowItem, typeKey } from "../actions";
+import { formatRelativeTime, LanguageContext, useT } from "../i18n";
 
-/** Map file_type to an emoji icon and badge style. */
-function getFileIcon(fileType: string, extension: string): string {
+/** Map file_type to a fallback emoji, shown until the real icon has loaded. */
+function getFileIcon(fileType: string, extension: string, filepath: string): string {
   switch (fileType) {
     case "app":
       return "🚀";
@@ -17,6 +20,12 @@ function getFileIcon(fileType: string, extension: string): string {
       return "🖼️";
     case "code":
       return "💻";
+    case "web":
+      return "🌐";
+    case "command":
+      return filepath.startsWith("ms-settings:") ? "⚙️" : "⚡";
+    case "window":
+      return "🪟";
     default:
       return "📄";
   }
@@ -128,52 +137,91 @@ const ResultItem: React.FC<ResultItemProps> = ({
   onSelect,
   onHover,
 }) => {
-  const icon = getFileIcon(result.file_type, result.extension);
+  const t = useT();
+  const isWeb = isWebItem(result);
+  // Web rows have nothing on disk to take an icon from
+  const icon = useIcon(isWeb ? "" : result.filepath);
+  const isStoreApp = result.filepath.startsWith(STORE_APP_PREFIX);
+  const kind = typeKey(result.file_type);
+  const isVirtual = isVirtualPath(result.filepath);
+  const hasFolder = !isVirtual && !isWeb && !isWindowItem(result);
+  // What sits under the name: the passage that matched, or where the item lives
+  const subtitle =
+    result.snippet ||
+    (isStoreApp ? t("installedApp") : isVirtual ? t("systemCommand") : result.filepath);
+  const language = useContext(LanguageContext);
+  // A shortcut stands for the thing it opens; its extension is noise.
+  const displayName = result.filename.replace(/\.(lnk|url)$/i, "");
+
+  // The item's history with the user: "Opened 14× · 2 hours ago"
+  const usage =
+    result.click_count > 0
+      ? [
+          t("openedTimes", { count: result.click_count }),
+          result.last_accessed > 0 && formatRelativeTime(result.last_accessed, language),
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : null;
 
   const handleContextMenu = useCallback(
     async (e: React.MouseEvent) => {
       e.preventDefault();
+      if (!hasFolder) return;
       try {
         await invoke("open_containing_folder", { filepath: result.filepath });
       } catch (err) {
         console.error("Failed to open folder:", err);
       }
     },
-    [result.filepath],
+    [result.filepath, hasFolder],
   );
 
   return (
     <div
       className={`result-item ${isSelected ? "selected" : ""}`}
+      data-type={kind.slice("type.".length)}
       onClick={() => onSelect(index)}
       onContextMenu={handleContextMenu}
       onMouseEnter={() => onHover(index)}
       role="option"
       aria-selected={isSelected}
-      title="Right-click to open containing folder"
+      title={hasFolder ? t("openFolderHint") : undefined}
     >
       {/* Icon */}
-      <div className="result-icon">{icon}</div>
+      <div className="result-icon">
+        {icon ? (
+          <img src={icon} alt="" draggable={false} />
+        ) : (
+          getFileIcon(result.file_type, result.extension, result.filepath)
+        )}
+      </div>
 
       {/* File info */}
       <div className="result-info">
         <div className="result-name">
-          {highlightName(result.filename, result.matched_indices)}
+          {highlightName(displayName, result.matched_indices)}
         </div>
-        <div className="result-path" title={result.filepath}>
-          {result.filepath}
-        </div>
+        {subtitle && (
+          <div className="result-path" title={hasFolder ? result.filepath : undefined}>
+            {subtitle}
+          </div>
+        )}
       </div>
 
       {/* Meta info */}
       <div className="result-meta">
-        {result.file_size > 0 && (
-          <span className="result-path" style={{ fontSize: "10px" }}>
-            {formatSize(result.file_size)}
-          </span>
+        {usage ? (
+          <span className="result-usage">{usage}</span>
+        ) : (
+          result.file_size > 0 && (
+            <span className="result-path result-size">
+              {formatSize(result.file_size)}
+            </span>
+          )
         )}
         <span className={`result-badge ${result.file_type}`}>
-          {result.file_type}
+          {t(kind)}
         </span>
         {index < 9 && (
           <span className="result-shortcut">⌃{index + 1}</span>

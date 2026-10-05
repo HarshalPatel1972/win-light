@@ -58,15 +58,15 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           tagName: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
-          releaseName: "AnCheck ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}"
+          releaseName: "Matchstick ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}"
           releaseBody: |
             ## What's Changed
 
             See [CHANGELOG.md](https://github.com/HarshalPatel1972/win-light/blob/main/CHANGELOG.md) for details.
 
             ### Installation
-            - **NSIS Installer** (recommended): Download `AnCheck_x.x.x_x64-setup.exe`
-            - **MSI Installer**: Download `AnCheck_x.x.x_x64_en-US.msi`
+            - **NSIS Installer** (recommended): Download `Matchstick_x.x.x_x64-setup.exe`
+            - **MSI Installer**: Download `Matchstick_x.x.x_x64_en-US.msi`
 
             ### Auto-Update
             Existing installations will be notified of this update automatically.
