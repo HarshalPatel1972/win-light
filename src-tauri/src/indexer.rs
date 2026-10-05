@@ -187,10 +187,19 @@ const SKIP_DIRS: &[&str] = &[
     "pkg",
     "vendor",
     "packages",
+    "packagecache",
     "program files",
     "program files (x86)",
     "programdata",
 ];
+
+/// Whether a path found elsewhere (e.g. by Windows Search) runs through a
+/// folder the index itself would never enter.
+pub fn is_in_skipped_dir(path: &str) -> bool {
+    let mut parts: Vec<&str> = path.split('\\').collect();
+    parts.pop(); // the file name itself is not a folder
+    parts.iter().skip(1).any(|part| should_skip_dir(part))
+}
 
 /// Check if a directory name should be skipped.
 fn should_skip_dir(name: &str) -> bool {
@@ -319,6 +328,7 @@ fn scan_all(roots: &[Root]) -> Vec<IndexEntry> {
         scan_tree(root, &root.path, &mut entries);
     }
     entries.extend(apps::list_store_apps());
+    entries.extend(crate::commands::entries());
     drop_programs_that_have_a_shortcut(&mut entries);
     entries
 }
@@ -536,6 +546,16 @@ mod tests {
 
     fn open_db(dir: &Path) -> Database {
         Database::open(&dir.join("index.db")).unwrap()
+    }
+
+    #[test]
+    fn recognises_paths_inside_skipped_folders() {
+        assert!(is_in_skipped_dir(r"C:\Users\me\proj\Library\PackageCache\com.x\CHANGELOG.md"));
+        assert!(is_in_skipped_dir(r"C:\Users\me\app\node_modules\pkg\README.md"));
+        assert!(is_in_skipped_dir(r"C:\Users\me\.config\notes.txt"));
+        assert!(!is_in_skipped_dir(r"C:\Users\me\Documents\CHANGELOG.md"));
+        // A file may be called like a skipped folder
+        assert!(!is_in_skipped_dir(r"C:\Users\me\Documents\target"));
     }
 
     #[test]

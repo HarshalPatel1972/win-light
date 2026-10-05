@@ -20,6 +20,7 @@ interface ResultsListProps {
 
 /** Results come in groups; the ones beyond plain name matches get a heading. */
 const GROUP_TITLE: Record<string, MessageKey> = {
+  window: "openWindows",
   content: "insideFiles",
   web: "web",
 };

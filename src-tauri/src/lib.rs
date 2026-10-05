@@ -1,5 +1,6 @@
 mod apps;
 mod calc;
+mod commands;
 mod db;
 mod icons;
 mod indexer;
@@ -8,6 +9,7 @@ mod launcher;
 mod searcher;
 mod settings;
 mod win;
+mod windows_list;
 mod winsearch;
 
 use db::Database;
@@ -131,7 +133,8 @@ const CONTENT_RESULTS: usize = 6;
 /// Find documents by what is written inside them, using the Windows Search index.
 #[tauri::command]
 async fn search_content(state: tauri::State<'_, AppState>, query: String) -> Result<Vec<SearchResult>, String> {
-    let hits = tokio::task::spawn_blocking(move || winsearch::search(&query, CONTENT_RESULTS))
+    // Ask for more than are shown, since some are filtered out below
+    let hits = tokio::task::spawn_blocking(move || winsearch::search(&query, CONTENT_RESULTS * 4))
         .await
         .map_err(|e| format!("Content search failed: {}", e))?;
 
@@ -140,8 +143,13 @@ async fn search_content(state: tauri::State<'_, AppState>, query: String) -> Res
     if found.len() > 5000 {
         found.clear();
     }
+    // Windows indexes package and build folders too; leave those out, and list
+    // each file name once, as the name search does
+    let mut names = HashSet::new();
     Ok(hits
         .into_iter()
+        .filter(|hit| !indexer::is_in_skipped_dir(&hit.path) && names.insert(hit.name.to_lowercase()))
+        .take(CONTENT_RESULTS)
         .enumerate()
         .map(|(i, hit)| {
             found.insert(hit.path.clone());
@@ -242,6 +250,34 @@ struct Preview {
     /// Unix time of the last change; 0 if unknown.
     modified: i64,
     is_folder: bool,
+    /// The opening lines of a text file, shown when there is no thumbnail.
+    text: Option<String>,
+}
+
+/// File types whose first lines are worth showing as a preview.
+const TEXT_EXTENSIONS: &[&str] = &[
+    "txt", "md", "log", "csv", "json", "xml", "yaml", "yml", "toml", "ini", "cfg", "rs", "py", "js", "ts", "jsx",
+    "tsx", "java", "c", "cpp", "h", "cs", "go", "rb", "php", "html", "css", "sql", "sh", "bat", "ps1",
+];
+
+/// The first lines of a text file, or None if it is not text.
+fn text_preview(filepath: &str) -> Option<String> {
+    use std::io::Read;
+    const MAX_BYTES: usize = 4096;
+    const MAX_LINES: usize = 40;
+
+    let extension = std::path::Path::new(filepath).extension()?.to_string_lossy().to_lowercase();
+    if !TEXT_EXTENSIONS.contains(&extension.as_str()) {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(MAX_BYTES);
+    std::fs::File::open(filepath).ok()?.take(MAX_BYTES as u64).read_to_end(&mut bytes).ok()?;
+    // A NUL byte means this is binary data wearing a text extension
+    if bytes.is_empty() || bytes.contains(&0) {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    Some(text.lines().take(MAX_LINES).collect::<Vec<_>>().join("\n"))
 }
 
 /// A large picture and the basic facts of a result, read fresh from disk.
@@ -263,10 +299,72 @@ async fn get_preview(state: tauri::State<'_, AppState>, filepath: String) -> Res
             size: metadata.as_ref().map_or(0, |m| if m.is_dir() { 0 } else { m.len() as i64 }),
             modified,
             is_folder: metadata.is_some_and(|m| m.is_dir()),
+            text: text_preview(&filepath),
         }
     })
     .await
     .map_err(|e| format!("Preview task failed: {}", e))
+}
+
+/// How many open windows a search offers to switch to.
+const WINDOW_RESULTS: usize = 3;
+
+/// Windows that are already open and match the query.
+#[tauri::command]
+async fn search_windows(state: tauri::State<'_, AppState>, query: String) -> Result<Vec<SearchResult>, String> {
+    let open = tokio::task::spawn_blocking(move || {
+        windows_list::matching(windows_list::list(), &query, WINDOW_RESULTS)
+    })
+    .await
+    .map_err(|e| format!("Window search failed: {}", e))?;
+
+    // The owning program lends its icon, so its path must be allowed
+    let mut found = state.found_paths.lock().unwrap();
+    Ok(open
+        .into_iter()
+        .map(|window| {
+            if !window.program.is_empty() {
+                found.insert(window.program.clone());
+            }
+            SearchResult {
+                // The window handle doubles as the id used to switch to it
+                id: window.handle as i64,
+                snippet: window.program_name().to_string(),
+                filename: window.title,
+                filepath: window.program,
+                extension: String::new(),
+                file_size: 0,
+                modified_at: 0,
+                file_type: "window".to_string(),
+                click_count: 0,
+                last_accessed: 0,
+                score: 0.0,
+                match_type: "window".to_string(),
+                matched_indices: Vec::new(),
+            }
+        })
+        .collect())
+}
+
+/// Bring an open window to the front.
+#[tauri::command]
+async fn activate_window(handle: i64) -> Result<(), String> {
+    windows_list::activate(handle as isize)
+}
+
+/// Search a website through one of the user's keyword shortcuts.
+#[tauri::command]
+async fn open_quick_link(state: tauri::State<'_, AppState>, keyword: String, query: String) -> Result<(), String> {
+    let link = state
+        .settings
+        .lock()
+        .unwrap()
+        .quick_links
+        .iter()
+        .find(|link| link.keyword.eq_ignore_ascii_case(&keyword))
+        .cloned()
+        .ok_or_else(|| format!("No shortcut called '{}'", keyword))?;
+    launcher::open_url(&link.url.replace("{query}", &encode_query(query.trim())))
 }
 
 /// Copy text (a path, an answer) to the clipboard.
@@ -372,6 +470,7 @@ struct SettingsView {
     theme: String,
     language: String,
     search_engine: String,
+    quick_links: Vec<settings::QuickLink>,
     launch_at_login: bool,
     version: String,
 }
@@ -385,6 +484,7 @@ async fn get_settings(app: AppHandle, state: tauri::State<'_, AppState>) -> Resu
         theme: settings.theme,
         language: settings.language,
         search_engine: settings.search_engine,
+        quick_links: settings.quick_links,
         launch_at_login: app.autolaunch().is_enabled().unwrap_or(false),
         version: app.package_info().version.to_string(),
     })
@@ -453,6 +553,30 @@ async fn set_appearance(state: tauri::State<'_, AppState>, theme: String, langua
 async fn set_search_engine(state: tauri::State<'_, AppState>, engine: String) -> Result<(), String> {
     let mut settings = state.settings.lock().unwrap();
     settings.search_engine = engine;
+    settings.save(&state.settings_path)
+}
+
+/// Replace the keyword shortcuts. Incomplete rows and addresses that are not
+/// web addresses are dropped rather than stored.
+#[tauri::command]
+async fn set_quick_links(
+    state: tauri::State<'_, AppState>,
+    links: Vec<settings::QuickLink>,
+) -> Result<(), String> {
+    let mut settings = state.settings.lock().unwrap();
+    settings.quick_links = links
+        .into_iter()
+        .map(|link| settings::QuickLink {
+            keyword: link.keyword.trim().to_lowercase(),
+            name: link.name.trim().to_string(),
+            url: link.url.trim().to_string(),
+        })
+        .filter(|link| {
+            !link.keyword.is_empty()
+                && !link.keyword.contains(char::is_whitespace)
+                && (link.url.starts_with("https://") || link.url.starts_with("http://"))
+        })
+        .collect();
     settings.save(&state.settings_path)
 }
 
@@ -668,6 +792,10 @@ pub fn run() {
             web_search,
             open_url,
             set_search_engine,
+            set_quick_links,
+            open_quick_link,
+            search_windows,
+            activate_window,
             rebuild_index,
             get_index_count,
             is_indexing,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import type { QuickLink } from "../actions";
 
 /** Settings as reported by the Rust backend. */
 export interface Settings {
@@ -8,6 +9,7 @@ export interface Settings {
   theme: string;
   language: string;
   search_engine: string;
+  quick_links: QuickLink[];
   launch_at_login: boolean;
   version: string;
 }
@@ -18,6 +20,7 @@ const DEFAULTS: Settings = {
   theme: "system",
   language: "auto",
   search_engine: "google",
+  quick_links: [],
   launch_at_login: false,
   version: "",
 };
@@ -95,5 +98,14 @@ export function useSettings() {
     await invoke("set_search_engine", { engine });
   }, []);
 
-  return { settings, setHotkey, setLaunchAtLogin, setAppearance, setSearchEngine };
+  const setQuickLinks = useCallback(
+    async (links: QuickLink[]) => {
+      await invoke("set_quick_links", { links });
+      // The backend drops incomplete rows; show what was actually kept
+      await refresh();
+    },
+    [refresh],
+  );
+
+  return { settings, setHotkey, setLaunchAtLogin, setAppearance, setSearchEngine, setQuickLinks };
 }

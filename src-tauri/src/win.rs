@@ -15,7 +15,19 @@ use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 /// Prefix of the launch target stored for packaged (Store) apps.
 pub const APPS_FOLDER_PREFIX: &str = "shell:AppsFolder\\";
 
-/// Whether a stored path is a shell target rather than a file on disk.
+/// Prefix of a built-in system command (lock, restart, ...).
+pub const COMMAND_PREFIX: &str = "command:";
+
+/// Prefix of a page in Windows Settings.
+pub const SETTINGS_PREFIX: &str = "ms-settings:";
+
+/// Whether a stored path names something other than a file on disk: a Store
+/// app, a system command or a Settings page.
+pub fn is_virtual(path: &str) -> bool {
+    is_shell_target(path) || path.starts_with(COMMAND_PREFIX) || path.starts_with(SETTINGS_PREFIX)
+}
+
+/// Whether a stored path is a Store app.
 pub fn is_shell_target(path: &str) -> bool {
     path.starts_with(APPS_FOLDER_PREFIX)
 }

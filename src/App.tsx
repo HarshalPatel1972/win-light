@@ -10,16 +10,29 @@ import Welcome, { hasBeenWelcomed } from "./components/Welcome";
 import { useSearch, type SearchResult } from "./hooks/useSearch";
 import { useKeyboardNav } from "./hooks/useKeyboardNav";
 import { formatHotkey, useSettings } from "./hooks/useSettings";
-import { actionFromKey, actionsFor, isWebItem, webItems, type ActionId } from "./actions";
+import {
+  actionFromKey,
+  actionsFor,
+  isWebItem,
+  isWindowItem,
+  matchQuickLink,
+  needsConfirmation,
+  quickLinkItem,
+  webItems,
+  type ActionId,
+} from "./actions";
 import { I18nContext, LanguageContext, makeTranslate, resolveLanguage } from "./i18n";
 
 /** How long a confirmation such as "Copied" stays in the status bar. */
 const NOTICE_MS = 1600;
 
 function App() {
-  const { query, setQuery, results, contentResults, answer, isLoading, clearSearch } =
+  const { query, setQuery, results, contentResults, windowResults, answer, isLoading, clearSearch } =
     useSearch(50);
-  const { settings, setHotkey, setLaunchAtLogin, setAppearance, setSearchEngine } = useSettings();
+  const { settings, setHotkey, setLaunchAtLogin, setAppearance, setSearchEngine, setQuickLinks } =
+    useSettings();
+  // A command that cannot be undone waits here for a second Enter
+  const [awaitingConfirm, setAwaitingConfirm] = useState<string | null>(null);
   const [view, setView] = useState<"search" | "settings">("search");
   const [welcomed, setWelcomed] = useState(hasBeenWelcomed);
   const [suggestions, setSuggestions] = useState<SearchResult[]>([]);
@@ -48,8 +61,14 @@ function App() {
     // is the fallback, so it goes last
     const address = web.filter((item) => item.filepath);
     const webSearch = web.filter((item) => !item.filepath);
-    return [...address, ...results, ...inside, ...webSearch];
-  }, [isHome, suggestions, results, contentResults, query, t]);
+    // "yt lofi": a keyword shortcut says exactly where the search should go
+    const quick = matchQuickLink(query, settings.quick_links);
+    const shortcut = quick
+      ? [quickLinkItem(quick.link, t("searchSiteFor", { site: quick.link.name, query: quick.rest }))]
+      : [];
+    // Something already open is usually what is wanted, so windows lead
+    return [...shortcut, ...address, ...windowResults, ...results, ...inside, ...webSearch];
+  }, [isHome, suggestions, results, contentResults, windowResults, query, settings.quick_links, t]);
 
   useEffect(() => {
     document.documentElement.lang = language;
@@ -58,6 +77,7 @@ function App() {
   // A launch error only describes the results currently on screen
   useEffect(() => {
     setLaunchError(null);
+    setAwaitingConfirm(null);
   }, [query]);
 
   const showNotice = useCallback((text: string) => {
@@ -83,12 +103,36 @@ function App() {
       if (!item || !actionsFor(item).includes(action)) return;
 
       try {
+        if (item.match_type.startsWith("quick:")) {
+          const quick = matchQuickLink(query, settings.quick_links);
+          if (quick) {
+            await invoke("open_quick_link", { keyword: quick.link.keyword, query: quick.rest });
+          }
+          await dismiss();
+          return;
+        }
+
         if (isWebItem(item)) {
           if (item.filepath) await invoke("open_url", { url: item.filepath });
           else await invoke("web_search", { query });
           await dismiss();
           return;
         }
+
+        if (isWindowItem(item)) {
+          // We hold the foreground right now, which is what lets us hand it on
+          await invoke("activate_window", { handle: item.id });
+          await dismiss();
+          return;
+        }
+
+        // Restart, shut down and the like run on the second Enter
+        if (needsConfirmation(item) && awaitingConfirm !== item.filepath) {
+          setAwaitingConfirm(item.filepath);
+          showNotice(t("confirmAgain", { name: item.filename }));
+          return;
+        }
+        setAwaitingConfirm(null);
 
         switch (action) {
           case "copyPath":
@@ -113,7 +157,7 @@ function App() {
         setLaunchError(String(error));
       }
     },
-    [query, dismiss, showNotice, t],
+    [query, dismiss, showNotice, t, settings.quick_links, awaitingConfirm],
   );
 
   const handleSelect = useCallback(
@@ -217,7 +261,14 @@ function App() {
   }, [refreshSuggestions]);
 
   // A closer look at the selected result, once the user is searching
-  const previewed = !isHome && selected && !isWebItem(selected) ? selected : null;
+  const previewed =
+    !isHome &&
+    selected &&
+    !isWebItem(selected) &&
+    !isWindowItem(selected) &&
+    selected.file_type !== "command"
+      ? selected
+      : null;
 
   let content;
   if (!welcomed) {
@@ -230,6 +281,7 @@ function App() {
         setLaunchAtLogin={setLaunchAtLogin}
         setAppearance={setAppearance}
         setSearchEngine={setSearchEngine}
+        setQuickLinks={setQuickLinks}
         indexCount={indexCount}
         isIndexing={isIndexing}
         availableUpdate={availableUpdate}

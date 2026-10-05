@@ -43,7 +43,7 @@ struct Item {
 impl Item {
     fn new(entry: FileEntry) -> Self {
         let path_fold = fold(&entry.filepath);
-        let is_app = crate::win::is_shell_target(&entry.filepath)
+        let is_app = crate::win::is_virtual(&entry.filepath)
             || (entry.file_type == "shortcut"
                 && (path_fold.contains("\\start menu\\") || path_fold.contains("\\desktop\\")));
         Item {

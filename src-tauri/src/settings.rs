@@ -15,6 +15,35 @@ pub struct Settings {
     pub language: String,
     /// "google", "bing" or "duckduckgo".
     pub search_engine: String,
+    /// Keyword shortcuts to websites, e.g. "yt cats" searches YouTube.
+    pub quick_links: Vec<QuickLink>,
+}
+
+/// A keyword that sends the rest of the query to a website.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QuickLink {
+    /// What the user types first, e.g. "yt".
+    pub keyword: String,
+    /// The site's name, shown in the result.
+    pub name: String,
+    /// Address with `{query}` where the search words go.
+    pub url: String,
+}
+
+impl QuickLink {
+    fn new(keyword: &str, name: &str, url: &str) -> Self {
+        QuickLink { keyword: keyword.to_string(), name: name.to_string(), url: url.to_string() }
+    }
+}
+
+/// The shortcuts a new install starts with.
+pub fn default_quick_links() -> Vec<QuickLink> {
+    vec![
+        QuickLink::new("yt", "YouTube", "https://www.youtube.com/results?search_query={query}"),
+        QuickLink::new("gh", "GitHub", "https://github.com/search?q={query}"),
+        QuickLink::new("wiki", "Wikipedia", "https://en.wikipedia.org/wiki/Special:Search?search={query}"),
+        QuickLink::new("maps", "Google Maps", "https://www.google.com/maps/search/{query}"),
+    ]
 }
 
 impl Default for Settings {
@@ -24,6 +53,7 @@ impl Default for Settings {
             theme: "system".to_string(),
             language: "auto".to_string(),
             search_engine: "google".to_string(),
+            quick_links: default_quick_links(),
         }
     }
 }
@@ -54,7 +84,7 @@ mod tests {
 
         assert_eq!(Settings::load(&path), Settings::default());
 
-        let custom = Settings { hotkey: "Alt+Space".into(), theme: "light".into(), language: "de".into(), search_engine: "bing".into() };
+        let custom = Settings { hotkey: "Alt+Space".into(), theme: "light".into(), language: "de".into(), search_engine: "bing".into(), quick_links: vec![] };
         custom.save(&path).unwrap();
         assert_eq!(Settings::load(&path), custom);
 

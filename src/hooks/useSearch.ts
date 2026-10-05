@@ -44,6 +44,7 @@ export function useSearch(debounceMs: number = 50) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [contentResults, setContentResults] = useState<SearchResult[]>([]);
+  const [windowResults, setWindowResults] = useState<SearchResult[]>([]);
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -54,15 +55,17 @@ export function useSearch(debounceMs: number = 50) {
 
     try {
       // Run search and the answer engine in parallel
-      const [searchResults, answered] = await Promise.all([
+      const [searchResults, answered, openWindows] = await Promise.all([
         invoke<SearchResult[]>("search", { query: q }),
         invoke<Answer | null>("eval_math", { query: q }),
+        invoke<SearchResult[]>("search_windows", { query: q }).catch(() => []),
       ]);
 
       // Only update if this is still the latest generation
       if (generation === abortRef.current) {
         setResults(searchResults);
         setAnswer(answered);
+        setWindowResults(openWindows);
       }
     } catch (error) {
       console.error("Search error:", error);
@@ -88,6 +91,7 @@ export function useSearch(debounceMs: number = 50) {
     if (!trimmed) {
       setResults([]);
       setContentResults([]);
+      setWindowResults([]);
       setAnswer(null);
       setIsLoading(false);
       return;
@@ -124,6 +128,7 @@ export function useSearch(debounceMs: number = 50) {
     setQuery("");
     setResults([]);
     setContentResults([]);
+    setWindowResults([]);
     setAnswer(null);
     setIsLoading(false);
   }, []);
@@ -133,6 +138,7 @@ export function useSearch(debounceMs: number = 50) {
     setQuery,
     results,
     contentResults,
+    windowResults,
     answer,
     isLoading,
     clearSearch,

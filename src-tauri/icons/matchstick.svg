@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Matchstick app icon: a lit match on ink. Source for every generated size
+       (run `npm run tauri icon src-tauri/icons/matchstick.png` after rendering). -->
+  <defs>
+    <radialGradient id="ink" cx="0.56" cy="0.3" r="0.9">
+      <stop offset="0" stop-color="#2a2433"/>
+      <stop offset="0.45" stop-color="#15151f"/>
+      <stop offset="1" stop-color="#090a10"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffb347" stop-opacity="0.55"/>
+      <stop offset="0.55" stop-color="#ff8f4b" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#ff8f4b" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="wood" x1="0" x2="1">
+      <stop offset="0" stop-color="#c08f58"/>
+      <stop offset="0.5" stop-color="#f3d3a4"/>
+      <stop offset="1" stop-color="#b07f48"/>
+    </linearGradient>
+    <linearGradient id="flame" x1="0.5" y1="1" x2="0.5" y2="0">
+      <stop offset="0" stop-color="#ff6a3d"/>
+      <stop offset="0.45" stop-color="#ff9f45"/>
+      <stop offset="1" stop-color="#ffd27a"/>
+    </linearGradient>
+    <radialGradient id="core" cx="0.5" cy="0.7" r="0.6">
+      <stop offset="0" stop-color="#fffdf2"/>
+      <stop offset="0.6" stop-color="#ffe6a3"/>
+      <stop offset="1" stop-color="#ffc35c"/>
+    </radialGradient>
+    <clipPath id="tile"><rect x="32" y="32" width="960" height="960" rx="216"/></clipPath>
+  </defs>
+
+  <rect x="32" y="32" width="960" height="960" rx="216" fill="url(#ink)"/>
+  <rect x="33.5" y="33.5" width="957" height="957" rx="214.5" fill="none" stroke="#ffffff" stroke-opacity="0.07" stroke-width="3"/>
+  <circle cx="590" cy="330" r="420" fill="url(#glow)" clip-path="url(#tile)"/>
+
+  <!-- The stick, leaning the way a struck match is held -->
+  <g transform="translate(0 44) rotate(28 512 560)">
+    <rect x="477" y="440" width="70" height="440" rx="30" fill="url(#wood)"/>
+  </g>
+
+  <!-- The flame, rising straight up from the head -->
+  <g transform="translate(0 -40)">
+  <path d="M594 118 C690 270 742 352 722 438 C704 512 646 548 580 548 C514 548 458 508 442 436 C422 340 518 268 594 118 Z" fill="url(#flame)"/>
+  <path d="M588 300 C636 372 660 414 648 458 C638 496 612 514 580 514 C548 514 522 494 514 458 C504 412 550 374 588 300 Z" fill="url(#core)"/>
+  </g>
+
+  <!-- The head, still dark at the heart of the flame -->
+  <g transform="translate(0 44) rotate(28 512 560)">
+    <ellipse cx="512" cy="446" rx="44" ry="56" fill="#4a211c"/>
+  </g>
+</svg>

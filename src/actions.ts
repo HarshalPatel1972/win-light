@@ -24,7 +24,37 @@ export const ACTION_KEYS: Record<ActionId, string> = {
   openWith: "Ctrl+O",
 };
 
-const KNOWN_TYPES = ["app", "shortcut", "folder", "document", "image", "code", "web"];
+const KNOWN_TYPES = [
+  "app",
+  "shortcut",
+  "folder",
+  "document",
+  "image",
+  "code",
+  "web",
+  "command",
+  "window",
+];
+
+/** Whether a path names something other than a file: a Store app, a command, a Settings page. */
+export function isVirtualPath(path: string): boolean {
+  return (
+    path.startsWith(STORE_APP_PREFIX) ||
+    path.startsWith("command:") ||
+    path.startsWith("ms-settings:")
+  );
+}
+
+/** Commands that cannot be undone ask for a second Enter before they run. */
+const NEEDS_CONFIRMATION = ["command:restart", "command:shutdown", "command:signout", "command:emptybin"];
+
+export function needsConfirmation(item: SearchResult): boolean {
+  return NEEDS_CONFIRMATION.includes(item.filepath);
+}
+
+export function isWindowItem(item: SearchResult): boolean {
+  return item.file_type === "window";
+}
 
 /** The translation key (and colour) for a result's kind; unknown kinds are plain files. */
 export function typeKey(fileType: string): MessageKey {
@@ -37,7 +67,7 @@ export function isWebItem(item: SearchResult): boolean {
 
 /** The actions that make sense for `item`, most common first. */
 export function actionsFor(item: SearchResult): ActionId[] {
-  if (isWebItem(item) || item.filepath.startsWith(STORE_APP_PREFIX)) return ["open"];
+  if (isWebItem(item) || isWindowItem(item) || isVirtualPath(item.filepath)) return ["open"];
   const runnable = item.file_type === "app" || item.file_type === "shortcut";
   if (runnable) return ["open", "admin", "reveal", "copyPath"];
   if (item.file_type === "folder") return ["open", "reveal", "copyPath"];
@@ -68,6 +98,33 @@ export function asWebAddress(query: string): string | null {
   if (/\s/.test(text)) return null;
   if (/^https?:\/\/\S+\.\S+/i.test(text)) return text;
   return ADDRESS.test(text) ? `https://${text}` : null;
+}
+
+/** A keyword that sends the rest of the query to a website. */
+export interface QuickLink {
+  keyword: string;
+  name: string;
+  url: string;
+}
+
+/**
+ * If the query starts with a shortcut keyword ("yt lofi"), the shortcut and
+ * the words after it.
+ */
+export function matchQuickLink(
+  query: string,
+  links: QuickLink[],
+): { link: QuickLink; rest: string } | null {
+  const [first, ...others] = query.trim().split(/\s+/);
+  const rest = others.join(" ");
+  if (!first || !rest) return null;
+  const link = links.find((candidate) => candidate.keyword.toLowerCase() === first.toLowerCase());
+  return link ? { link, rest } : null;
+}
+
+/** The row for a keyword shortcut. Its path remembers which shortcut it is. */
+export function quickLinkItem(link: QuickLink, label: string): SearchResult {
+  return { ...webItem(-1002, label, ""), snippet: link.name, match_type: `quick:${link.keyword}` };
 }
 
 function webItem(id: number, filename: string, filepath: string): SearchResult {

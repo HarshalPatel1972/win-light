@@ -6,6 +6,7 @@ import {
   ACTION_LABEL,
   STORE_APP_PREFIX,
   actionsFor,
+  isVirtualPath,
   typeKey,
   type ActionId,
 } from "../actions";
@@ -19,6 +20,8 @@ interface Preview {
   size: number;
   modified: number;
   is_folder: boolean;
+  /** The opening lines of a text file. */
+  text: string | null;
 }
 
 /** Wait this long on a result before loading its preview, so arrowing through a list stays instant. */
@@ -79,9 +82,14 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ item, onAction }) => {
 
   return (
     <aside className="preview" data-type={item.file_type}>
-      <div className={`preview-picture ${preview?.is_thumbnail ? "" : "icon"}`}>
-        {preview?.image && <img src={preview.image} alt="" draggable={false} />}
-      </div>
+      {/* Text is best previewed as text; everything else as a picture */}
+      {preview?.text && !preview.is_thumbnail ? (
+        <pre className="preview-text">{preview.text}</pre>
+      ) : (
+        <div className={`preview-picture ${preview?.is_thumbnail ? "" : "icon"}`}>
+          {preview?.image && <img src={preview.image} alt="" draggable={false} />}
+        </div>
+      )}
       <div className="preview-name">{name}</div>
       <div className="preview-kind">
         {t(typeKey(item.file_type))}
@@ -101,7 +109,9 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ item, onAction }) => {
         </dl>
       )}
 
-      <div className="preview-path">{isStoreApp ? t("installedApp") : item.filepath}</div>
+      <div className="preview-path">
+        {isStoreApp ? t("installedApp") : isVirtualPath(item.filepath) ? t("systemCommand") : item.filepath}
+      </div>
 
       <div className="preview-actions">
         {actionsFor(item).map((action) => (

@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { LANGUAGES, useT } from "../i18n";
+import type { QuickLink } from "../actions";
+import QuickLinksEditor from "./QuickLinksEditor";
 import { formatHotkey, type Settings as SettingsData } from "../hooks/useSettings";
 
 interface SettingsProps {
@@ -9,6 +11,7 @@ interface SettingsProps {
   setLaunchAtLogin: (enabled: boolean) => Promise<void>;
   setAppearance: (theme: string, language: string) => Promise<void>;
   setSearchEngine: (engine: string) => Promise<void>;
+  setQuickLinks: (links: QuickLink[]) => Promise<void>;
   indexCount: number;
   isIndexing: boolean;
   availableUpdate: string | null;
@@ -39,6 +42,7 @@ const Settings: React.FC<SettingsProps> = ({
   setLaunchAtLogin,
   setAppearance,
   setSearchEngine,
+  setQuickLinks,
   indexCount,
   isIndexing,
   availableUpdate,
@@ -194,6 +198,14 @@ const Settings: React.FC<SettingsProps> = ({
             <option value="bing">Bing</option>
             <option value="duckduckgo">DuckDuckGo</option>
           </select>
+        </div>
+
+        <div className="settings-row stacked">
+          <div className="settings-label">
+            <span>{t("quickLinks")}</span>
+            <span className="settings-hint">{t("quickLinksHelp")}</span>
+          </div>
+          <QuickLinksEditor links={settings.quick_links} onSave={setQuickLinks} />
         </div>
 
         <div className="settings-row">

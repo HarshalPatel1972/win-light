@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Actions on a result:** show in folder (`Ctrl+Enter`), run as administrator (`Ctrl+Shift+Enter`), open with (`Ctrl+O`), copy path (`Ctrl+Shift+C`)
 - **Web:** every search ends with "Search the web for…", and a typed address (`github.com`) opens directly. The search engine is a setting
 
+- **System commands:** lock, sleep, sign out, restart, shut down, empty the recycle bin, and 18 pages of Windows Settings (`display`, `wifi`, `bluetooth`, …). Commands that cannot be undone ask for a second Enter
+- **Switch to open windows:** a window that is already open and matches the query is offered first
+- **Keyword shortcuts:** `yt lofi beats` searches YouTube; `gh`, `wiki` and `maps` are built in and the list is editable in Settings
+- **Text preview:** the opening lines of text and code files are shown in the preview pane
+- New app icon
+
 ### Changed
 - The whole user folder and other internal drives are indexed, not just Desktop, Documents and Downloads
 - A program file is hidden when its Start Menu shortcut is already listed (no more `POWERPNT.EXE` next to PowerPoint)

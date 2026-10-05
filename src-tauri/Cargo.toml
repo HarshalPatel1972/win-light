@@ -62,6 +62,10 @@ windows = { version = "0.58", features = [
     "Win32_System_Ole",
     "Win32_System_DataExchange",
     "Win32_System_Memory",
+    "Win32_System_Shutdown",
+    "Win32_System_Power",
+    "Win32_System_Threading",
+    "Win32_Graphics_Dwm",
 ] }
 
 [dev-dependencies]

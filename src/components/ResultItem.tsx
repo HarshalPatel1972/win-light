@@ -2,11 +2,11 @@ import React, { useCallback, useContext } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { SearchResult } from "../hooks/useSearch";
 import { useIcon } from "../hooks/useIcon";
-import { STORE_APP_PREFIX, isWebItem, typeKey } from "../actions";
+import { STORE_APP_PREFIX, isVirtualPath, isWebItem, isWindowItem, typeKey } from "../actions";
 import { formatRelativeTime, LanguageContext, useT } from "../i18n";
 
 /** Map file_type to a fallback emoji, shown until the real icon has loaded. */
-function getFileIcon(fileType: string, extension: string): string {
+function getFileIcon(fileType: string, extension: string, filepath: string): string {
   switch (fileType) {
     case "app":
       return "🚀";
@@ -22,6 +22,10 @@ function getFileIcon(fileType: string, extension: string): string {
       return "💻";
     case "web":
       return "🌐";
+    case "command":
+      return filepath.startsWith("ms-settings:") ? "⚙️" : "⚡";
+    case "window":
+      return "🪟";
     default:
       return "📄";
   }
@@ -139,9 +143,12 @@ const ResultItem: React.FC<ResultItemProps> = ({
   const icon = useIcon(isWeb ? "" : result.filepath);
   const isStoreApp = result.filepath.startsWith(STORE_APP_PREFIX);
   const kind = typeKey(result.file_type);
-  const hasFolder = !isStoreApp && !isWeb;
+  const isVirtual = isVirtualPath(result.filepath);
+  const hasFolder = !isVirtual && !isWeb && !isWindowItem(result);
   // What sits under the name: the passage that matched, or where the item lives
-  const subtitle = result.snippet || (isStoreApp ? t("installedApp") : result.filepath);
+  const subtitle =
+    result.snippet ||
+    (isStoreApp ? t("installedApp") : isVirtual ? t("systemCommand") : result.filepath);
   const language = useContext(LanguageContext);
   // A shortcut stands for the thing it opens; its extension is noise.
   const displayName = result.filename.replace(/\.(lnk|url)$/i, "");
@@ -186,7 +193,7 @@ const ResultItem: React.FC<ResultItemProps> = ({
         {icon ? (
           <img src={icon} alt="" draggable={false} />
         ) : (
-          getFileIcon(result.file_type, result.extension)
+          getFileIcon(result.file_type, result.extension, result.filepath)
         )}
       </div>
 

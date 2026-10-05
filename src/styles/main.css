@@ -627,11 +627,16 @@ button.math-result {
 }
 
 .preview-name {
+  flex-shrink: 0;
   font-family: var(--font-display);
   font-size: 16px;
   font-weight: 600;
   line-height: 1.25;
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .preview-kind {
@@ -677,6 +682,11 @@ button.math-result {
   line-height: 1.4;
   color: var(--text-muted);
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  flex-shrink: 0;
   user-select: text;
   -webkit-user-select: text;
 }
@@ -708,6 +718,75 @@ button.math-result {
 .preview-action:hover {
   background: var(--surface);
   color: var(--text-primary);
+}
+
+/* The opening lines of a text file, in place of a picture */
+.preview-text {
+  height: 150px;
+  flex-shrink: 0;
+  margin-bottom: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  white-space: pre;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 70%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent);
+}
+
+.result-item[data-type="command"],
+.result-item[data-type="window"] { --hue: var(--light); }
+
+/* ── Keyword shortcuts editor (Settings) ── */
+.settings-row.stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.quick-links {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.quick-link {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+
+.field {
+  min-width: 0;
+  padding: 6px 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12.5px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.field:focus-visible {
+  outline: 2px solid var(--light);
+  outline-offset: 1px;
+}
+
+.field.keyword { width: 76px; }
+.field.name { width: 128px; }
+.field.url { flex: 1; }
+
+.button.remove {
+  padding: 6px 10px;
+  color: var(--text-muted);
 }
 
 /* ── Footer Hints ── */

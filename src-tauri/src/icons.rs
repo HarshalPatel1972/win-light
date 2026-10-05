@@ -1,6 +1,6 @@
 //! Extracts the real shell icon for a file or app as a PNG data URL.
 
-use crate::win::{is_shell_target, to_wide, ComGuard};
+use crate::win::{is_virtual, to_wide, ComGuard, COMMAND_PREFIX, SETTINGS_PREFIX};
 use base64::Engine;
 use std::collections::HashMap;
 use std::path::Path;
@@ -41,6 +41,9 @@ pub struct IconCache {
 impl IconCache {
     /// Return the icon for `filepath` as a `data:image/png;base64,...` URL.
     pub fn get(&self, filepath: &str) -> Option<String> {
+        if has_no_shell_icon(filepath) {
+            return None;
+        }
         let key = cache_key(filepath);
         if let Some(cached) = self.icons.lock().unwrap().get(&key) {
             return cached.clone();
@@ -63,6 +66,9 @@ impl IconCache {
     /// differently: a thumbnail has real detail at full size, while an icon
     /// stretched to that size turns to mush.
     pub fn preview(&self, filepath: &str) -> Option<(String, bool)> {
+        if has_no_shell_icon(filepath) {
+            return None;
+        }
         if let Some(cached) = self.previews.lock().unwrap().get(filepath) {
             return cached.clone();
         }
@@ -80,9 +86,15 @@ impl IconCache {
     }
 }
 
+/// Commands and Settings pages are not shell items; asked anyway, Windows
+/// hands back a generic "web address" globe, which is worse than nothing.
+fn has_no_shell_icon(filepath: &str) -> bool {
+    filepath.starts_with(COMMAND_PREFIX) || filepath.starts_with(SETTINGS_PREFIX)
+}
+
 /// Files of the same type share one icon, except those that carry their own.
 fn cache_key(filepath: &str) -> String {
-    if is_shell_target(filepath) {
+    if is_virtual(filepath) {
         return filepath.to_string();
     }
     let path = Path::new(filepath);
@@ -228,6 +240,14 @@ mod tests {
         assert_eq!(cache_key(r"C:\a\app.exe"), r"C:\a\app.exe");
         assert_eq!(cache_key(r"C:\a\folder"), r"C:\a\folder");
         assert_eq!(cache_key(r"shell:AppsFolder\X!App"), r"shell:AppsFolder\X!App");
+    }
+
+    #[test]
+    fn commands_and_settings_pages_have_no_shell_icon() {
+        let cache = IconCache::default();
+        assert_eq!(cache.get("command:restart"), None);
+        assert_eq!(cache.get("ms-settings:display"), None);
+        assert_eq!(cache.preview("command:lock"), None);
     }
 
     #[test]

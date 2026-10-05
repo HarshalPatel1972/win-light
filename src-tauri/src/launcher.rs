@@ -1,4 +1,4 @@
-use crate::win::{is_shell_target, to_wide, ComGuard};
+use crate::win::{is_virtual, to_wide, ComGuard, COMMAND_PREFIX};
 use log::info;
 use std::path::Path;
 use windows::core::PCWSTR;
@@ -33,7 +33,11 @@ impl Verb {
 /// a file name is ever interpreted as a command. The shell also takes care of
 /// shortcuts, file associations and UAC elevation.
 pub fn launch(target: &str, verb: Verb) -> Result<(), String> {
-    if is_shell_target(target) {
+    if let Some(command) = target.strip_prefix(COMMAND_PREFIX) {
+        return crate::commands::run(command);
+    }
+    // Store apps and Settings pages are addresses the shell understands
+    if is_virtual(target) {
         return shell_execute(target, None, verb);
     }
 
@@ -96,8 +100,8 @@ fn shell_execute(target: &str, working_dir: Option<&str>, verb: Verb) -> Result<
 
 /// Open the containing folder of a file in Explorer, with the file selected.
 pub fn open_containing_folder(filepath: &str) -> Result<(), String> {
-    if is_shell_target(filepath) {
-        return Err("Store apps have no containing folder".to_string());
+    if is_virtual(filepath) {
+        return Err("This item has no containing folder".to_string());
     }
     if !Path::new(filepath).exists() {
         return Err(format!("File not found: {}", filepath));
