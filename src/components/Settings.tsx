@@ -259,12 +259,14 @@ const Settings: React.FC<SettingsProps> = ({
           <div className="settings-label">
             <span>{t("updates")}</span>
             <span className="settings-hint">
-              {availableUpdate
-                ? t("updateAvailable", { version: availableUpdate })
-                : updateStatus}
+              {settings.store_edition
+                ? t("storeUpdates")
+                : availableUpdate
+                  ? t("updateAvailable", { version: availableUpdate })
+                  : updateStatus}
             </span>
           </div>
-          {availableUpdate ? (
+          {settings.store_edition ? null : availableUpdate ? (
             <button className="button primary" disabled={isInstalling} onClick={onInstallUpdate}>
               {isInstalling ? t("installing") : t("install")}
             </button>

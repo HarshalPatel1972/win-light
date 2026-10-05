@@ -8,6 +8,7 @@ mod intro;
 mod launcher;
 mod searcher;
 mod settings;
+mod store;
 mod strings;
 mod win;
 mod windows_list;
@@ -71,6 +72,9 @@ pub struct AppState {
     pub keep_open: AtomicBool,
     /// Where the index, settings and log live.
     pub data_dir: PathBuf,
+    /// Running as a Microsoft Store package: the Store updates the app and
+    /// Windows owns the "start at login" switch.
+    pub store_edition: bool,
 }
 
 impl AppState {
@@ -547,6 +551,8 @@ struct SettingsView {
     exclude_folders: Vec<String>,
     launch_at_login: bool,
     version: String,
+    /// Installed from the Microsoft Store (which then handles updates).
+    store_edition: bool,
 }
 
 #[tauri::command]
@@ -561,8 +567,13 @@ async fn get_settings(app: AppHandle, state: tauri::State<'_, AppState>) -> Resu
         quick_links: settings.quick_links,
         include_folders: settings.include_folders,
         exclude_folders: settings.exclude_folders,
-        launch_at_login: app.autolaunch().is_enabled().unwrap_or(false),
+        launch_at_login: if state.store_edition {
+            store::starts_at_login()
+        } else {
+            app.autolaunch().is_enabled().unwrap_or(false)
+        },
         version: app.package_info().version.to_string(),
+        store_edition: state.store_edition,
     })
 }
 
@@ -611,7 +622,14 @@ async fn set_hotkey(app: AppHandle, state: tauri::State<'_, AppState>, hotkey: S
 }
 
 #[tauri::command]
-async fn set_launch_at_login(app: AppHandle, enabled: bool) -> Result<(), String> {
+async fn set_launch_at_login(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    if state.store_edition {
+        return store::set_starts_at_login(enabled);
+    }
     let autolaunch = app.autolaunch();
     let result = if enabled { autolaunch.enable() } else { autolaunch.disable() };
     result.map_err(|e| format!("Failed to change startup setting: {}", e))
@@ -749,6 +767,10 @@ async fn find_update(app: &AppHandle) -> Result<Option<tauri_plugin_updater::Upd
 /// Check for a newer release. Returns its version if there is one.
 #[tauri::command]
 async fn check_for_update(app: AppHandle) -> Result<Option<String>, String> {
+    // A Store install is updated by the Store, never by us
+    if app.state::<AppState>().store_edition {
+        return Ok(None);
+    }
     Ok(find_update(&app).await?.map(|u| u.version))
 }
 
@@ -773,8 +795,9 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
 
 /// Look for updates shortly after startup and then periodically.
 fn start_update_checker(app: &AppHandle) {
-    // Development builds have no release to update to.
-    if cfg!(debug_assertions) {
+    // Development builds have no release to update to, and Store installs
+    // are updated by the Store.
+    if cfg!(debug_assertions) || app.state::<AppState>().store_edition {
         return;
     }
     let app = app.clone();
@@ -900,6 +923,10 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 pub fn run() {
     let data_dir = app_data_dir();
     init_logging(&data_dir);
+    let store_edition = store::is_packaged();
+    if store_edition {
+        info!("Running as a Microsoft Store package");
+    }
     let db_path = data_dir.join("index.db");
     migrate_legacy_data(&db_path);
     let settings_path = data_dir.join("settings.json");
@@ -934,6 +961,7 @@ pub fn run() {
         tray_items: Mutex::new(Vec::new()),
         keep_open: AtomicBool::new(false),
         data_dir,
+        store_edition,
     };
 
     tauri::Builder::default()
@@ -1010,7 +1038,8 @@ pub fn run() {
 
             // A launcher is only useful if it is running, so installed builds
             // start with Windows by default; the user can turn this off in Settings.
-            if first_run && !cfg!(debug_assertions) {
+            // (A Store package declares this in its manifest instead.)
+            if first_run && !cfg!(debug_assertions) && !state.store_edition {
                 if let Err(e) = handle.autolaunch().enable() {
                     warn!("Could not enable launch at login: {}", e);
                 }
@@ -1030,7 +1059,9 @@ pub fn run() {
             }
 
             // Stay in the tray when started by Windows at login
-            if !std::env::args().any(|arg| arg == HIDDEN_ARG) {
+            let started_by_windows = std::env::args().any(|arg| arg == HIDDEN_ARG)
+                || (state.store_edition && store::launched_at_login());
+            if !started_by_windows {
                 show_window(&handle);
             }
 
