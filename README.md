@@ -1,7 +1,8 @@
 # Matchstick — strike a match, find anything on your PC
 
 [![Build](https://github.com/HarshalPatel1972/win-light/actions/workflows/build.yml/badge.svg)](https://github.com/HarshalPatel1972/win-light/actions/workflows/build.yml)
-[![Release](https://github.com/HarshalPatel1972/win-light/releases/latest)](https://github.com/HarshalPatel1972/win-light/releases/latest)
+[![Release](https://img.shields.io/github/v/release/HarshalPatel1972/win-light?label=release)](https://github.com/HarshalPatel1972/win-light/releases/latest)
+[![Microsoft Store](https://img.shields.io/badge/Microsoft%20Store-Matchstick%20Launcher-0078D4)](https://apps.microsoft.com/detail/9PJ64FKJ8C40)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A fast, native search launcher for Windows, built with **Rust + Tauri v2** and **React + TypeScript**. Press `Ctrl+Space` from anywhere to find and open apps, files, documents by their contents, open windows, system commands and quick answers.
